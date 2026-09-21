@@ -47,7 +47,33 @@ def load_house_config(
         if value is None or not value.strip():
             raise ValueError(f"{variable} is required")
         values[field_name] = value.strip()
-    return HouseSettings(**values)
+    max_upload_bytes = _positive_int(
+        source.get("HOUSE_MAX_UPLOAD_BYTES"),
+        default=5 * 1024 * 1024,
+        variable="HOUSE_MAX_UPLOAD_BYTES",
+    )
+    max_batch_rows = _positive_int(
+        source.get("HOUSE_MAX_BATCH_ROWS"),
+        default=10_000,
+        variable="HOUSE_MAX_BATCH_ROWS",
+    )
+    return HouseSettings(
+        **values,
+        max_upload_bytes=max_upload_bytes,
+        max_batch_rows=max_batch_rows,
+    )
+
+
+def _positive_int(value: str | None, *, default: int, variable: str) -> int:
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise ValueError(f"{variable} must be a positive integer") from error
+    if parsed <= 0:
+        raise ValueError(f"{variable} must be a positive integer")
+    return parsed
 
 
 __all__ = ["HouseSettings", "load_house_config"]

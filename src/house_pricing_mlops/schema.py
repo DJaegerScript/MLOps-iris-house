@@ -164,20 +164,28 @@ def validate_prediction_frame(
             f"missing required columns: {', '.join(missing)}"
         )
 
+    normalized = frame.copy()
+    for feature in NUMERIC_FEATURES:
+        normalized[feature] = pd.to_numeric(normalized[feature], errors="coerce")
+    if allow_labels and TARGET_NAME in normalized:
+        normalized[TARGET_NAME] = pd.to_numeric(
+            normalized[TARGET_NAME], errors="coerce"
+        )
+
     valid_indices: list[Any] = []
     invalid_rows: list[BatchRowError] = []
-    for row_index, row in frame.iterrows():
+    for row_index, row in normalized.iterrows():
         row_values = {feature: row[feature] for feature in MODEL_FEATURES}
         try:
             validate_single_features(row_values)
-            if allow_labels and TARGET_NAME in frame:
+            if allow_labels and TARGET_NAME in normalized:
                 _validate_label_value(row[TARGET_NAME])
         except SchemaValidationError as error:
             invalid_rows.append(BatchRowError(int(row_index), error.issues))
         else:
             valid_indices.append(row_index)
 
-    valid_frame = frame.loc[valid_indices].copy()
+    valid_frame = normalized.loc[valid_indices].copy()
     return BatchValidationResult(valid_frame, tuple(invalid_rows))
 
 

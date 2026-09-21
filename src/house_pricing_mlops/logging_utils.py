@@ -109,6 +109,42 @@ class HouseStructuredLogger:
         self.event("house_prediction_error", valid_input=valid_input, error=error)
         self.metric("HousePredictionErrorCount", 1.0)
 
+    def batch_validation_error(self, *, error: str) -> None:
+        self.event("house_batch_validation_error", error=error)
+        self.metric("HouseInvalidInputCount", 1.0)
+
+    def batch_prediction_error(self, *, error: str) -> None:
+        self.event("house_batch_prediction_error", error=error)
+        self.metric("HousePredictionErrorCount", 1.0)
+
+    def batch_prediction(
+        self,
+        *,
+        rows_received: int,
+        rows_processed: int,
+        invalid_rows: int,
+        drifted_features: int,
+        latency_ms: float,
+        batch_mae: float | None,
+        batch_rmse: float | None,
+    ) -> None:
+        self.event(
+            "house_batch_prediction",
+            rows_received=rows_received,
+            rows_processed=rows_processed,
+            invalid_rows=invalid_rows,
+            drifted_features=drifted_features,
+            latency_ms=latency_ms,
+        )
+        self.metric("HouseBatchPredictionCount", 1.0)
+        self.metric("HouseBatchRowsProcessed", float(rows_processed))
+        self.metric("HouseInvalidInputCount", float(invalid_rows))
+        self.metric("HouseDriftedFeatureCount", float(drifted_features))
+        if batch_mae is not None:
+            self.metric("HouseBatchMAE", batch_mae)
+        if batch_rmse is not None:
+            self.metric("HouseBatchRMSE", batch_rmse)
+
     def _write(self, record: dict[str, object]) -> None:
         self._stream.write(json.dumps(record, separators=(",", ":")) + "\n")
         self._stream.flush()
