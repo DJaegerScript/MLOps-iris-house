@@ -66,9 +66,11 @@ metrics must not be used as production claims.
 
 The real Kaggle `train.csv` is now versioned privately in S3 as
 `datasets/house-prices/v1/train.csv`; its checksum, S3 VersionId, training run,
-model bundle VersionId, and current candidate/approval status are recorded in
+model bundle VersionId, and promotion decision are recorded in
 [`docs/house-pricing.md`](docs/house-pricing.md). ECS production promotion
-remains explicitly approval-gated.
+was explicitly approved for registry version `1` and deployed through the
+existing ECS service. The training workflow remains manual and approval-gated;
+application deployment does not retrain the model.
 
 ## Model provenance
 

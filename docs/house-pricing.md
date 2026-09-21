@@ -213,11 +213,27 @@ full prediction inputs are not logged.
 ## Current production boundary
 
 The real Kaggle intake, S3 dataset version, MLflow run/model version, candidate
-registration, and immutable model bundle publication are complete. The local
-registry currently records candidate version `1`; no `champion` alias or
-production promotion decision has been fabricated. ECS deployment remains
-approval-gated. Before deploying, record the promotion decision, image tag and
-digest, and ECS deployment revision in the AWS operations guide.
+registration, and immutable model bundle publication are complete. Registry
+version `1` is the approved `champion` and retains the `candidate` alias. The
+promotion decision was recorded by `DJaegerScript` with the reason
+`Explicitly approved for production deployment in the implementation session`.
+The corresponding immutable audit record is
+`mlflow/registry/house-price-model/v1-champion-78c798da18f14485aea9f8376308b438.json`.
+
+The application was deployed to the existing ECS service in GitHub Actions
+run `35607090494` from main commit
+`98105435797360ee5bb5e1e16de3b22cbe028088`. The deployed image is tagged with
+that commit and has ECR digest
+`sha256:4cbcfc177ab1a753e9cb8bc7302c1622db80f07fd5a8b1dad70780a242055539`.
+The exact House model remains pinned to S3 VersionId
+`XWYuPZ9y7F2dzZNIubOZML49TgOjKl_D`; the exact dataset is pinned to VersionId
+`2IzOEQWUuttBf0c5gkW0X8kR5cr6j7d9`.
+
+The public health endpoint, Iris prediction, House online prediction, labeled
+batch prediction, invalid batch validation, CloudWatch structured logs, and
+House Pricing custom metrics were verified after deployment. The training
+workflow is intentionally manual and production promotion remains an explicit
+operator decision; application deployment does not retrain the model.
 
 The application reuses the existing private S3 bucket, ECR repository, ECS
 service, CloudWatch log group, and OIDC deployment pattern. House artifacts use
