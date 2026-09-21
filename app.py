@@ -13,7 +13,6 @@ from house_pricing_mlops.config import HouseSettings, load_house_config
 from house_pricing_mlops.logging_utils import HouseStructuredLogger
 from house_pricing_mlops.prediction import (
     HouseBatchPredictionService,
-    HouseBatchValidationError,
     HousePredictionInputError,
     HousePredictionService,
 )
@@ -257,48 +256,6 @@ def _render_house_page() -> None:
         else:
             st.success(f"Predicted sale price: ${result.predicted_sale_price:,.0f}")
             st.caption(f"Inference latency: {result.latency_ms:.1f} ms")
-
-    uploader = getattr(st, "file_uploader", None)
-    if not callable(uploader):
-        return
-    st.subheader("Batch prediction")
-    uploaded_file = uploader("Upload a CSV of properties", type=["csv"])
-    if uploaded_file is None or not st.button("Run batch prediction"):
-        return
-    try:
-        result = runtime.batch_service.predict_csv(
-            uploaded_file,
-            filename=getattr(uploaded_file, "name", "uploaded.csv"),
-        )
-    except HouseBatchValidationError as error:
-        st.error(f"Batch validation error: {error}")
-        return
-    except Exception:
-        st.error("Batch prediction failed. Please try again.")
-        return
-    st.write(result.predictions.head(10))
-    st.download_button(
-        "Download predictions",
-        data=result.csv_bytes(),
-        file_name="house_predictions.csv",
-        mime="text/csv",
-    )
-    if result.metrics is not None:
-        st.write({name.upper(): value for name, value in result.metrics.items()})
-    st.write("Per-feature drift scores", result.drift_report.per_feature_scores)
-    st.write("Unknown-category values", result.drift_report.unknown_category_count)
-    st.caption(
-        f"Rows processed: {result.rows_processed}; "
-        f"invalid rows: {result.invalid_row_count}; "
-        f"drifted features: {result.drift_report.number_drifted_features}."
-    )
-    if result.drift_report.sample_size_warning:
-        st.warning(
-            "This batch is smaller than the educational drift-monitoring "
-            "sample-size guideline; one-row predictions cannot reliably measure "
-            "input drift."
-        )
-
 
 def _house_category_options(model: LoadedHousePriceModel, feature: str) -> list[str]:
     try:
