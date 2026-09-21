@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -337,7 +338,17 @@ def _house_category_label(feature: str, value: object) -> str:
 
 
 def main() -> None:
-    """Render the selected AI product page."""
+    """Render the configured AI product surface."""
+
+    variant = os.environ.get("APP_VARIANT", "iris").strip().lower()
+    if variant == "house":
+        st.set_page_config(page_title="House Price Prediction", page_icon="🏠")
+        _render_house_page()
+        return
+    if variant != "iris":
+        st.set_page_config(page_title="Application unavailable", page_icon="⚠️")
+        st.error(f"Unsupported application variant: {variant}")
+        return
 
     st.set_page_config(page_title="Iris Classifier", page_icon="🌸")
     if _selected_product() == HOUSE_PRODUCT:
