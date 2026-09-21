@@ -16,7 +16,7 @@ import joblib
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
-from iris_mlops.manifest import V1_EXPECTATIONS, ModelManifest
+from iris_mlops.manifest import ModelManifest, is_trusted_v1_manifest
 
 ARTIFACT_NAMES = (
     "iris_model.pkl",
@@ -67,7 +67,6 @@ class LoadedIrisModel:
     model: Any
     scaler: Any
     label_encoder: Any
-    metadata: object | None = None
     classes: tuple[str, ...] = NORMALIZED_LABELS
 
     def predict(self, features: object) -> IrisPrediction:
@@ -106,7 +105,18 @@ class LoadedIrisModel:
                 raise ArtifactSchemaError(
                     "predict_proba must return finite probabilities"
                 )
+            if not 0 <= numeric_value <= 1:
+                raise ArtifactSchemaError(
+                    "predict_proba probabilities must be within [0, 1]"
+                )
             probability_values.append(numeric_value)
+
+        if not math.isclose(
+            math.fsum(probability_values), 1.0, rel_tol=1e-6, abs_tol=1e-6
+        ):
+            raise ArtifactSchemaError(
+                "predict_proba probabilities must sum approximately to 1"
+            )
 
         probability_map = dict(zip(self.classes, probability_values, strict=True))
         return IrisPrediction(
@@ -134,9 +144,12 @@ def load_verified_model(
     members = _read_verified_members(bundle_bytes, manifest.artifact_checksums)
     load = joblib.load if deserializer is None else deserializer
 
-    model = load(io.BytesIO(members["iris_model.pkl"]))
-    scaler = load(io.BytesIO(members["scaler.pkl"]))
-    label_encoder = load(io.BytesIO(members["label_encoder.pkl"]))
+    try:
+        model = load(io.BytesIO(members["iris_model.pkl"]))
+        scaler = load(io.BytesIO(members["scaler.pkl"]))
+        label_encoder = load(io.BytesIO(members["label_encoder.pkl"]))
+    except Exception as error:
+        raise ArtifactLoadError("could not deserialize model artifacts") from error
     _validate_deserialized_artifacts(model, scaler, label_encoder)
 
     return LoadedIrisModel(
@@ -169,65 +182,8 @@ def load_model_from_s3(
 def _validate_manifest_for_loading(manifest: object) -> None:
     if not isinstance(manifest, ModelManifest):
         raise ArtifactLoadError("a validated v1 manifest is required")
-
-    expectations = V1_EXPECTATIONS
-    try:
-        features = tuple(manifest.features)
-        classes = tuple(manifest.classes)
-    except TypeError as error:
-        raise ArtifactSchemaError(
-            "manifest feature and class schema is invalid"
-        ) from error
-    if features != expectations.features:
-        raise ArtifactSchemaError("manifest feature schema is not the Iris v1 schema")
-    if classes != expectations.classes:
-        raise ArtifactSchemaError("manifest class schema is not the Iris v1 schema")
-
-    normalization = manifest.class_label_normalization
-    if not isinstance(normalization, Mapping):
-        raise ArtifactSchemaError("manifest source label normalization is invalid")
-    if (
-        tuple(normalization.get("source_labels", ())) != SOURCE_LABELS
-        or tuple(normalization.get("manifest_labels", ())) != expectations.classes
-        or normalization.get("rule")
-        != expectations.class_label_normalization["rule"]
-        or dict(normalization) != dict(expectations.class_label_normalization)
-    ):
-        raise ArtifactSchemaError("manifest source labels do not normalize correctly")
-
-    if (
-        manifest.model_name != expectations.model_name
-        or manifest.model_version != expectations.model_version
-        or manifest.source != expectations.source
-        or manifest.source_revision != expectations.source_revision
-        or manifest.framework != expectations.framework
-        or manifest.framework_version != expectations.framework_version
-        or manifest.python_version != expectations.python_version
-        or manifest.training_metrics != expectations.training_metrics
-    ):
-        raise ArtifactIntegrityError("manifest does not match trusted v1 identity")
-
-    checksums = manifest.artifact_checksums
-    if not isinstance(checksums, Mapping):
-        raise ArtifactIntegrityError("manifest artifact checksums are invalid")
-    if set(checksums) != set(ARTIFACT_NAMES):
-        raise ArtifactIntegrityError("manifest checksums must cover the four artifacts")
-    if dict(checksums) != dict(expectations.artifact_checksums):
-        raise ArtifactIntegrityError(
-            "manifest checksums do not match trusted v1 manifest"
-        )
-    if manifest.bundle_sha256 != expectations.bundle_sha256:
-        raise ArtifactIntegrityError("manifest bundle checksum is not trusted")
-    for name in ARTIFACT_NAMES:
-        checksum = checksums[name]
-        if not isinstance(checksum, str) or len(checksum) != 64:
-            raise ArtifactIntegrityError(f"manifest checksum for {name} is invalid")
-        try:
-            int(checksum, 16)
-        except ValueError as error:
-            raise ArtifactIntegrityError(
-                f"manifest checksum for {name} is invalid"
-            ) from error
+    if not is_trusted_v1_manifest(manifest):
+        raise ArtifactIntegrityError("manifest does not match trusted v1 manifest")
 
 
 def _read_verified_members(
@@ -236,10 +192,8 @@ def _read_verified_members(
 ) -> dict[str, bytes]:
     try:
         archive = tarfile.open(fileobj=io.BytesIO(bundle_bytes), mode="r:gz")
-    except (tarfile.TarError, OSError) as error:
-        raise ArtifactLoadError(
-            "model bundle is not a valid gzip tar archive"
-        ) from error
+    except Exception as error:
+        raise ArtifactLoadError("could not open model bundle archive") from error
 
     found: dict[str, bytes] = {}
     try:
@@ -261,8 +215,8 @@ def _read_verified_members(
 
     except ArtifactLoadError:
         raise
-    except (tarfile.TarError, OSError, EOFError) as error:
-        raise ArtifactLoadError("could not read the model bundle") from error
+    except Exception as error:
+        raise ArtifactLoadError("could not read model bundle archive") from error
 
     missing = [name for name in ARTIFACT_NAMES if name not in found]
     if missing:

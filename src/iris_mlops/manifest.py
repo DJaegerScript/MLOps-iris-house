@@ -154,6 +154,30 @@ class ModelManifest:
     training_metrics: Mapping[str, object]
 
 
+def is_trusted_v1_manifest(manifest: ModelManifest) -> bool:
+    """Return whether every validated manifest field matches the v1 contract."""
+
+    if not isinstance(manifest, ModelManifest):
+        return False
+    expectations = V1_EXPECTATIONS
+    return (
+        manifest.model_name == expectations.model_name
+        and manifest.model_version == expectations.model_version
+        and manifest.source == expectations.source
+        and manifest.source_revision == expectations.source_revision
+        and manifest.features == expectations.features
+        and manifest.classes == expectations.classes
+        and manifest.class_label_normalization
+        == expectations.class_label_normalization
+        and manifest.framework == expectations.framework
+        and manifest.framework_version == expectations.framework_version
+        and manifest.python_version == expectations.python_version
+        and manifest.artifact_checksums == expectations.artifact_checksums
+        and manifest.bundle_sha256 == expectations.bundle_sha256
+        and manifest.training_metrics == expectations.training_metrics
+    )
+
+
 def _require_mapping(value: object, field: str) -> Mapping[str, object]:
     if not isinstance(value, Mapping):
         raise ValueError(f"{field}: expected an object")
@@ -379,6 +403,7 @@ __all__ = [
     "V1_EXPECTATIONS",
     "V1_VALIDATOR_NAME",
     "V1ManifestExpectations",
+    "is_trusted_v1_manifest",
     "load_manifest",
     "validate_manifest",
     "validate_v1_manifest",

@@ -13,7 +13,7 @@ import pytest
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
-import iris_mlops.model as model_module
+import iris_mlops.manifest as manifest_module
 from iris_mlops.manifest import ModelManifest, load_manifest
 from iris_mlops.model import (
     ArtifactIntegrityError,
@@ -31,6 +31,7 @@ ARTIFACT_NAMES = (
     "label_encoder.pkl",
     "metadata.pkl",
 )
+CANONICAL_MANIFEST = load_manifest(MANIFEST_PATH)
 
 
 def _untrained_objects() -> dict[str, object]:
@@ -77,17 +78,17 @@ def _manifest_for(
     bundle: bytes,
     monkeypatch: pytest.MonkeyPatch,
 ) -> ModelManifest:
-    manifest = load_manifest(MANIFEST_PATH)
+    manifest = CANONICAL_MANIFEST
     checksums = {
         name: hashlib.sha256(checksum_members[name]).hexdigest()
         for name in ARTIFACT_NAMES
     }
     trusted = replace(
-        model_module.V1_EXPECTATIONS,
+        manifest_module.V1_EXPECTATIONS,
         artifact_checksums=checksums,
         bundle_sha256=hashlib.sha256(bundle).hexdigest(),
     )
-    monkeypatch.setattr(model_module, "V1_EXPECTATIONS", trusted)
+    monkeypatch.setattr(manifest_module, "V1_EXPECTATIONS", trusted)
     return replace(
         manifest,
         artifact_checksums=checksums,
@@ -148,6 +149,36 @@ def test_loader_checks_bundle_hash_before_member_deserialization(
     deserializer.assert_not_called()
 
 
+def test_loader_wraps_deserializer_failures_without_leaking_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    members = _valid_members()
+    bundle = _bundle(members)
+    manifest = _manifest_for(members, bundle, monkeypatch)
+    deserializer = Mock(side_effect=RuntimeError("pickle internals and secret"))
+
+    with pytest.raises(
+        ArtifactLoadError, match="could not deserialize model artifacts"
+    ) as error:
+        load_verified_model(bundle, manifest, deserializer=deserializer)
+
+    assert str(error.value) == "could not deserialize model artifacts"
+
+
+def test_loader_wraps_malformed_archive_failures_with_a_stable_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    malformed_bundle = b"not a gzip tar archive"
+    manifest = _manifest_for(_valid_members(), malformed_bundle, monkeypatch)
+
+    with pytest.raises(
+        ArtifactLoadError, match="could not open model bundle archive"
+    ) as error:
+        load_verified_model(malformed_bundle, manifest)
+
+    assert str(error.value) == "could not open model bundle archive"
+
+
 def test_loader_deserializes_only_allowed_objects_from_in_memory_streams(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -162,7 +193,6 @@ def test_loader_deserializes_only_allowed_objects_from_in_memory_streams(
     assert loaded.model is objects["iris_model.pkl"]
     assert loaded.scaler is objects["scaler.pkl"]
     assert loaded.label_encoder is objects["label_encoder.pkl"]
-    assert loaded.metadata is None
     assert deserializer.call_count == 3
     assert all(
         isinstance(call.args[0], io.BytesIO) for call in deserializer.call_args_list

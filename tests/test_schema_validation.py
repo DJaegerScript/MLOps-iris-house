@@ -12,9 +12,10 @@ import pytest
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
-import iris_mlops.model as model_module
+import iris_mlops.manifest as manifest_module
 from iris_mlops.manifest import ModelManifest, load_manifest
 from iris_mlops.model import (
+    ArtifactIntegrityError,
     ArtifactSchemaError,
     LoadedIrisModel,
     load_verified_model,
@@ -22,6 +23,7 @@ from iris_mlops.model import (
 
 REPOSITORY_ROOT = Path(__file__).parents[1]
 MANIFEST_PATH = REPOSITORY_ROOT / "artifacts" / "iris-classifier-v1.manifest.json"
+CANONICAL_MANIFEST = load_manifest(MANIFEST_PATH)
 ARTIFACT_NAMES = (
     "iris_model.pkl",
     "scaler.pkl",
@@ -89,13 +91,13 @@ def _bundle_and_manifest(
     }
     if monkeypatch is not None:
         trusted = replace(
-            model_module.V1_EXPECTATIONS,
+            manifest_module.V1_EXPECTATIONS,
             artifact_checksums=checksums,
             bundle_sha256=hashlib.sha256(bundle).hexdigest(),
         )
-        monkeypatch.setattr(model_module, "V1_EXPECTATIONS", trusted)
+        monkeypatch.setattr(manifest_module, "V1_EXPECTATIONS", trusted)
     manifest = replace(
-        load_manifest(MANIFEST_PATH),
+        CANONICAL_MANIFEST,
         artifact_checksums=checksums,
         bundle_sha256=hashlib.sha256(bundle).hexdigest(),
     )
@@ -135,7 +137,7 @@ def test_loader_rejects_noncanonical_feature_or_class_schema(
 ) -> None:
     bundle, manifest, objects = _bundle_and_manifest(monkeypatch=monkeypatch)
 
-    with pytest.raises(ArtifactSchemaError, match="schema"):
+    with pytest.raises(ArtifactIntegrityError, match="trusted"):
         _load(replace(manifest, **manifest_change), objects, bundle)
 
 
@@ -222,6 +224,28 @@ def test_prediction_rejects_probability_output_that_is_not_three_classes(
     loaded = _load(manifest, objects, bundle)
 
     with pytest.raises(ArtifactSchemaError, match="three classes"):
+        loaded.predict([[5.1, 3.5, 1.4, 0.2]])
+
+
+@pytest.mark.parametrize(
+    "probabilities",
+    [
+        [[-0.1, 0.6, 0.5]],
+        [[1.1, -0.1, 0.0]],
+        [[0.2, 0.2, 0.2]],
+    ],
+)
+def test_prediction_rejects_probability_values_outside_range_or_bad_sum(
+    probabilities: list[list[float]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = StubLinearDiscriminantAnalysis(probabilities=probabilities)
+    bundle, manifest, objects = _bundle_and_manifest(
+        model=model, monkeypatch=monkeypatch
+    )
+    loaded = _load(manifest, objects, bundle)
+
+    with pytest.raises(ArtifactSchemaError, match="probabilities"):
         loaded.predict([[5.1, 3.5, 1.4, 0.2]])
 
 

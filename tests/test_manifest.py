@@ -2,6 +2,7 @@
 
 import importlib
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -242,6 +243,15 @@ def test_v1_validator_is_explicitly_named_and_versioned(manifest_api) -> None:
 
     assert manifest.model_name == "iris-classifier"
     assert manifest.model_version == "v1"
+
+
+def test_trusted_v1_manifest_helper_rejects_forged_identity(manifest_api) -> None:
+    manifest = manifest_api.load_manifest(MANIFEST_PATH)
+
+    assert manifest_api.is_trusted_v1_manifest(manifest)
+    assert not manifest_api.is_trusted_v1_manifest(
+        replace(manifest, source_revision="forged-revision")
+    )
 
 
 def test_manifest_documents_source_label_normalization() -> None:
