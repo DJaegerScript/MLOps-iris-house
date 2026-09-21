@@ -59,6 +59,14 @@ jobs:
           image_uri="${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${GITHUB_SHA}"
           echo "image_uri=${image_uri}" >> "${GITHUB_OUTPUT}"
           echo "image_tag=${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
+          if aws ecr describe-images \
+            --repository-name "${ECR_REPOSITORY}" \
+            --image-ids "imageTag=${GITHUB_SHA}" \
+            --region "${AWS_REGION}" >/dev/null 2>&1; then
+            echo "image_exists=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "image_exists=false" >> "${GITHUB_OUTPUT}"
+          fi
 
       - name: Log in to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
@@ -66,10 +74,15 @@ jobs:
       - name: Build and push commit-tagged image
         env:
           IMAGE_URI: ${{ steps.image.outputs.image_uri }}
+          IMAGE_EXISTS: ${{ steps.image.outputs.image_exists }}
         run: |
           set -euo pipefail
-          docker build --pull --file Dockerfile --tag "${IMAGE_URI}" .
-          docker push "${IMAGE_URI}"
+          if [[ "${IMAGE_EXISTS}" == "true" ]]; then
+            echo "Immutable image tag already exists; reusing ${IMAGE_URI}."
+          else
+            docker build --pull --file Dockerfile --tag "${IMAGE_URI}" .
+            docker push "${IMAGE_URI}"
+          fi
 
       - name: Create or update ECS Express Mode service
         env:
