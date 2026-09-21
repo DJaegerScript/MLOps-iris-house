@@ -146,9 +146,9 @@ Resources:
         Ref: GitHubWebhookSecretName
       GenerateSecretString:
         SecretStringTemplate: '{}'
-      GenerateStringKey: webhook_secret
-      PasswordLength: 48
-      ExcludePunctuation: true
+        GenerateStringKey: webhook_secret
+        PasswordLength: 48
+        ExcludePunctuation: true
 
   HouseCloudWatchLogGroup:
     Type: AWS::Logs::LogGroup
