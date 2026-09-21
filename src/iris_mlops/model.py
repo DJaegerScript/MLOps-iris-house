@@ -24,6 +24,10 @@ ARTIFACT_NAMES = (
     "label_encoder.pkl",
     "metadata.pkl",
 )
+MAX_BUNDLE_BYTES = 64 * 1024 * 1024
+MAX_MEMBER_BYTES = 16 * 1024 * 1024
+MAX_TOTAL_UNCOMPRESSED_BYTES = 64 * 1024 * 1024
+MAX_ARCHIVE_MEMBERS = 8
 SOURCE_LABELS = (
     "Iris-setosa",
     "Iris-versicolor",
@@ -121,7 +125,7 @@ class LoadedIrisModel:
         probability_map = dict(zip(self.classes, probability_values, strict=True))
         return IrisPrediction(
             predicted_class=predicted_class,
-            confidence=max(probability_values),
+            confidence=probability_map[predicted_class],
             probabilities=probability_map,
         )
 
@@ -137,6 +141,8 @@ def load_verified_model(
     _validate_manifest_for_loading(manifest)
     if not isinstance(bundle_bytes, bytes):
         raise ArtifactLoadError("model bundle must be provided as bytes")
+    if len(bundle_bytes) > MAX_BUNDLE_BYTES:
+        raise ArtifactLoadError("model bundle exceeds the maximum allowed size")
     actual_bundle_sha256 = hashlib.sha256(bundle_bytes).hexdigest()
     if not hmac.compare_digest(actual_bundle_sha256, manifest.bundle_sha256):
         raise ArtifactIntegrityError("bundle checksum mismatch")
@@ -171,7 +177,12 @@ def load_model_from_s3(
 ) -> LoadedIrisModel:
     """Fetch one explicit S3 object version and pass it to the pure loader."""
 
-    bundle_bytes = store.get_versioned_object(bucket, key, version_id)
+    try:
+        bundle_bytes = store.get_versioned_object(bucket, key, version_id)
+    except ArtifactLoadError:
+        raise
+    except Exception as error:
+        raise ArtifactLoadError("could not retrieve model artifact") from error
     return load_verified_model(
         bundle_bytes,
         manifest,
@@ -198,20 +209,40 @@ def _read_verified_members(
     found: dict[str, bytes] = {}
     try:
         with archive:
-            for member in archive.getmembers():
+            member_count = 0
+            total_uncompressed_bytes = 0
+            for member in archive:
+                member_count += 1
+                if member_count > MAX_ARCHIVE_MEMBERS:
+                    raise ArtifactIntegrityError(
+                        "model bundle contains too many archive members"
+                    )
                 _validate_tar_member(member)
                 name = member.name
                 if name in found:
                     raise ArtifactIntegrityError(f"duplicate artifact member: {name}")
                 if name not in ARTIFACT_NAMES:
                     raise ArtifactIntegrityError(f"unexpected artifact member: {name}")
+                if member.size > MAX_MEMBER_BYTES:
+                    raise ArtifactIntegrityError(
+                        f"artifact member exceeds the maximum allowed size: {name}"
+                    )
+                total_uncompressed_bytes += member.size
+                if total_uncompressed_bytes > MAX_TOTAL_UNCOMPRESSED_BYTES:
+                    raise ArtifactIntegrityError(
+                        "model bundle exceeds the maximum uncompressed size"
+                    )
 
                 extracted = archive.extractfile(member)
                 if extracted is None:
                     raise ArtifactIntegrityError(
                         f"could not read artifact member: {name}"
                     )
-                found[name] = extracted.read()
+                found[name] = extracted.read(MAX_MEMBER_BYTES + 1)
+                if len(found[name]) > MAX_MEMBER_BYTES:
+                    raise ArtifactIntegrityError(
+                        f"artifact member exceeds the maximum allowed size: {name}"
+                    )
 
     except ArtifactLoadError:
         raise

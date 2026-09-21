@@ -16,6 +16,8 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 import iris_mlops.manifest as manifest_module
 from iris_mlops.manifest import ModelManifest, load_manifest
 from iris_mlops.model import (
+    MAX_BUNDLE_BYTES,
+    MAX_MEMBER_BYTES,
     ArtifactIntegrityError,
     ArtifactLoadError,
     load_model_from_s3,
@@ -149,6 +151,48 @@ def test_loader_checks_bundle_hash_before_member_deserialization(
     deserializer.assert_not_called()
 
 
+def test_loader_uses_the_predicted_class_probability_as_confidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    objects = _untrained_objects()
+    model = objects["iris_model.pkl"]
+    scaler = objects["scaler.pkl"]
+    encoder = objects["label_encoder.pkl"]
+    scaler.transform = lambda features: features  # type: ignore[method-assign]
+    encoder.inverse_transform = lambda _values: ["Iris-setosa"]  # type: ignore[method-assign]
+    model.predict = lambda _features: [0]  # type: ignore[method-assign]
+    model.predict_proba = lambda _features: [[0.2, 0.7, 0.1]]  # type: ignore[method-assign]
+    bundle = _bundle(_valid_members())
+    manifest = _manifest_for(_valid_members(), bundle, monkeypatch)
+    deserializer = Mock(
+        side_effect=[model, scaler, encoder]
+    )
+
+    loaded = load_verified_model(bundle, manifest, deserializer=deserializer)
+
+    assert loaded.predict([[5.1, 3.5, 1.4, 0.2]]).confidence == 0.2
+
+
+def test_loader_wraps_versioned_store_failures() -> None:
+    store = Mock()
+    store.get_versioned_object.side_effect = RuntimeError(
+        "credentials and request details"
+    )
+
+    with pytest.raises(
+        ArtifactLoadError, match="could not retrieve model artifact"
+    ) as error:
+        load_model_from_s3(
+            store,
+            "private-iris-bucket",
+            "models/iris/v1.tar.gz",
+            "version-123",
+            CANONICAL_MANIFEST,
+        )
+
+    assert str(error.value) == "could not retrieve model artifact"
+
+
 def test_loader_wraps_deserializer_failures_without_leaking_details(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -177,6 +221,25 @@ def test_loader_wraps_malformed_archive_failures_with_a_stable_message(
         load_verified_model(malformed_bundle, manifest)
 
     assert str(error.value) == "could not open model bundle archive"
+
+
+def test_loader_rejects_a_bundle_that_exceeds_the_size_limit() -> None:
+    with pytest.raises(ArtifactLoadError, match="maximum allowed size"):
+        load_verified_model(b"x" * (MAX_BUNDLE_BYTES + 1), CANONICAL_MANIFEST)
+
+
+def test_loader_rejects_a_member_that_exceeds_the_size_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    members = _valid_members()
+    members.pop("iris_model.pkl")
+    oversized = tarfile.TarInfo("iris_model.pkl")
+    oversized.size = MAX_MEMBER_BYTES + 1
+    bundle = _bundle(members, [oversized])
+    manifest = _manifest_for(_valid_members(), bundle, monkeypatch)
+
+    with pytest.raises(ArtifactIntegrityError, match="maximum allowed size"):
+        load_verified_model(bundle, manifest)
 
 
 def test_loader_deserializes_only_allowed_objects_from_in_memory_streams(

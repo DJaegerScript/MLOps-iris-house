@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
+MAX_OBJECT_BYTES = 64 * 1024 * 1024
+
+
+class ArtifactStoreError(RuntimeError):
+    """A versioned model object could not be retrieved safely."""
+
 
 class S3ArtifactStore:
     """Read one explicitly versioned object from S3.
@@ -36,22 +42,29 @@ class S3ArtifactStore:
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{field} must be a non-empty string")
 
-        response = self._client.get_object(
-            Bucket=bucket,
-            Key=key,
-            VersionId=version_id,
-        )
-        body = response["Body"]
         try:
-            payload = body.read()
-        finally:
-            close = getattr(body, "close", None)
-            if callable(close):
-                close()
+            response = self._client.get_object(
+                Bucket=bucket,
+                Key=key,
+                VersionId=version_id,
+            )
+            body = response["Body"]
+            try:
+                payload = body.read(MAX_OBJECT_BYTES + 1)
+            finally:
+                close = getattr(body, "close", None)
+                if callable(close):
+                    close()
+        except Exception as error:
+            raise ArtifactStoreError(
+                "could not retrieve versioned model artifact"
+            ) from error
 
         if not isinstance(payload, bytes):
-            raise TypeError("S3 artifact body must return bytes")
+            raise ArtifactStoreError("S3 artifact body must return bytes")
+        if len(payload) > MAX_OBJECT_BYTES:
+            raise ArtifactStoreError("model artifact exceeds the maximum allowed size")
         return payload
 
 
-__all__ = ["S3ArtifactStore"]
+__all__ = ["ArtifactStoreError", "S3ArtifactStore"]
