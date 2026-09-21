@@ -14,6 +14,7 @@ def test_dockerfile_is_pinned_non_root_and_health_checked() -> None:
     dockerfile = (ROOT / "Dockerfile").read_text()
 
     assert "FROM python:3.12-slim-bookworm" in dockerfile
+    assert "PYTHONPATH=/app/src" in dockerfile
     assert "COPY requirements.txt" in dockerfile
     assert "pip install --no-cache-dir" in dockerfile
     assert "EXPOSE 8501" in dockerfile
