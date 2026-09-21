@@ -184,13 +184,13 @@ def test_house_page_renders_all_declared_inputs_versions_and_prediction(
     assert input_keys == [*NUMERIC_FEATURES, *CATEGORICAL_FEATURES]
     assert fake_st.input_labels == {
         "OverallQual": "Overall Quality",
-        "GrLivArea": "Above-Ground Living Area",
+        "GrLivArea": "Above-Ground Living Area (sq ft)",
         "GarageCars": "Garage Capacity",
         "TotalBsmtSF": "Total Basement Area",
         "1stFlrSF": "First-Floor Area",
         "YearBuilt": "Year Built",
         "FullBath": "Full Bathrooms",
-        "TotRmsAbvGrd": "Total Rooms Above Ground",
+        "TotRmsAbvGrd": "Total Rooms Above Grade",
         "GarageArea": "Garage Area",
         "Neighborhood": "Neighborhood",
         "KitchenQual": "Kitchen Quality",
