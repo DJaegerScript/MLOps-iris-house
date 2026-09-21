@@ -72,7 +72,11 @@ def test_manifest_loads_the_complete_metadata_contract() -> None:
     assert manifest.source_revision == SOURCE_REVISION
     assert manifest.features == EXPECTED_FEATURES
     assert manifest.classes == EXPECTED_CLASSES
-    assert manifest.class_label_normalization == EXPECTED_LABEL_NORMALIZATION
+    assert dict(manifest.class_label_normalization) == {
+        "source_labels": tuple(EXPECTED_LABEL_NORMALIZATION["source_labels"]),
+        "manifest_labels": tuple(EXPECTED_LABEL_NORMALIZATION["manifest_labels"]),
+        "rule": EXPECTED_LABEL_NORMALIZATION["rule"],
+    }
     assert manifest.framework == "scikit-learn"
     assert manifest.framework_version == "1.8.0"
     assert manifest.python_version == "not reported by source"
@@ -195,11 +199,82 @@ def test_training_metrics_are_explicitly_source_reported(manifest_api) -> None:
         manifest_api.validate_manifest(payload)
 
 
+@pytest.mark.parametrize(
+    ("path", "replacement"),
+    [
+        (("probabilities_supported",), 1),
+        (("cross_validation", "folds"), True),
+        (("test_accuracy",), 1),
+    ],
+)
+def test_training_metrics_require_exact_json_scalar_types(
+    manifest_api, path: tuple[str, ...], replacement: object
+) -> None:
+    payload = _manifest_payload()
+    value = payload["training_metrics"]
+    for key in path[:-1]:
+        value = value[key]
+    value[path[-1]] = replacement
+
+    with pytest.raises(ValueError, match="training_metrics"):
+        manifest_api.validate_manifest(payload)
+
+
+def test_v1_validator_is_explicitly_named_and_versioned(manifest_api) -> None:
+    assert manifest_api.V1_VALIDATOR_NAME == "iris-classifier-v1"
+    manifest = manifest_api.validate_v1_manifest(_manifest_payload())
+
+    assert manifest.model_name == "iris-classifier"
+    assert manifest.model_version == "v1"
+
+
 def test_manifest_documents_source_label_normalization() -> None:
     payload = _manifest_payload()
 
     assert payload["classes"] == list(EXPECTED_CLASSES)
     assert payload["class_label_normalization"] == EXPECTED_LABEL_NORMALIZATION
+
+
+def test_load_manifest_distinguishes_missing_file(manifest_api, tmp_path: Path) -> None:
+    missing_path = tmp_path / "missing.json"
+
+    with pytest.raises(
+        manifest_api.ManifestNotFoundError, match="manifest file not found"
+    ):
+        manifest_api.load_manifest(missing_path)
+
+
+def test_load_manifest_distinguishes_malformed_json(
+    manifest_api, tmp_path: Path
+) -> None:
+    malformed_path = tmp_path / "malformed.json"
+    malformed_path.write_text("{not valid json", encoding="utf-8")
+
+    with pytest.raises(manifest_api.ManifestJSONError, match="malformed JSON"):
+        manifest_api.load_manifest(malformed_path)
+
+
+def test_load_manifest_distinguishes_invalid_utf8(manifest_api, tmp_path: Path) -> None:
+    invalid_utf8_path = tmp_path / "invalid-utf8.json"
+    invalid_utf8_path.write_bytes(b"\xff\xfe")
+
+    with pytest.raises(manifest_api.ManifestEncodingError, match="invalid UTF-8"):
+        manifest_api.load_manifest(invalid_utf8_path)
+
+
+def test_validated_nested_metadata_is_immutable(manifest_api) -> None:
+    manifest = manifest_api.load_manifest(MANIFEST_PATH)
+
+    with pytest.raises(TypeError):
+        manifest.artifact_checksums["metadata.pkl"] = "changed"
+    with pytest.raises(TypeError):
+        manifest.class_label_normalization["rule"] = "changed"
+    with pytest.raises(TypeError):
+        manifest.class_label_normalization["manifest_labels"][0] = "changed"
+    with pytest.raises(TypeError):
+        manifest.training_metrics["test_accuracy"] = 0.5
+    with pytest.raises(TypeError):
+        manifest.training_metrics["cross_validation"]["folds"] = 5
 
 
 def test_manifest_contains_metadata_only(manifest_api) -> None:
