@@ -210,8 +210,8 @@ The public application URL is:
 
 The live health endpoint returned `200 ok`, and the verified sample prediction
 returned `setosa` with a 100% class probability. The deployed image is tagged
-with commit `62a5c5668c0d896ab767915dbcf012463a915616` and resolves to ECR digest
-`sha256:b7f91060c588be16127b73c8701561bcaf1b037e0c28fc0df88f86a7bc2e500f`.
+with commit `a8f1eab5054b386a682410d58be214ce5c330b95` and resolves to ECR digest
+`sha256:42a628f3a4c4db2b94b91e472f70c540aaa6d1903ecacfe66804d78f9eb87c81`.
 The deployed model version is `v1`.
 
 ### GitHub Actions OIDC variables
