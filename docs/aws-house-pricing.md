@@ -45,14 +45,15 @@ The task role must retain the exact `house-pricing-model-read` statement for
 the configured House model object; this stack does not broaden it or grant a
 wildcard model prefix.
 
-The GitHub CodeConnections ARN and MLflow Secrets Manager ARN are deployment
-inputs when those services are used. The verified account currently has no
-CodeConnections connection and no MLflow Secrets Manager secret, so the
-parameter file leaves both values unresolved and the training buildspec uses
-an ephemeral local MLflow store plus an immutable S3 tracking snapshot. Do not
-deploy the stack until a real CodeConnections ARN is supplied. If a managed
-MLflow endpoint is later introduced, provide its secret ARN and enable the
-conditional training-role permission.
+The legacy GitHub OAuth source uses a GitHub token stored in Secrets Manager
+and an AWS CodePipeline webhook with a separate generated HMAC secret. The
+token must have `repo` and `admin:repo_hook` scopes; it is never committed or
+printed. The verified account currently has no GitHub token secret and no
+MLflow Secrets Manager secret, so the parameter file leaves those values
+unresolved and the training buildspec uses an ephemeral local MLflow store
+plus an immutable S3 tracking snapshot. If a managed MLflow endpoint is later
+introduced, provide its secret ARN and enable the conditional training-role
+permission.
 
 The deployed application receives the exact House model S3 key and `VersionId`
 through non-secret GitHub environment variables. The application does not
@@ -229,6 +230,6 @@ The local implementation and CloudFormation template are validated, but no
 House CodePipeline or pipeline artifact bucket has been created. The live ECS
 Express service is active, the exact task-role House read policy is present,
 and the known dataset/model S3 versions are readable. Live pipeline execution
-is blocked until an authorized operator creates or supplies an AWS
-CodeConnections GitHub connection ARN. No AWS resource creation or production
-pipeline execution is performed with the placeholder ARN.
+is blocked until an authorized operator creates or supplies the GitHub OAuth
+token secret with the required scopes. No AWS resource creation or production
+pipeline execution is performed with the placeholder token secret ARN.

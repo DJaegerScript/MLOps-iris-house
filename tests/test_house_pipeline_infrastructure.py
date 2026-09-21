@@ -23,12 +23,14 @@ def test_template_defines_v2_pipelines_and_encrypted_artifact_storage() -> None:
     assert template.count("AWS::CodeBuild::Project") >= 4
 
 
-def test_template_defines_codeconnections_approval_and_pipeline_variables() -> None:
+def test_template_defines_github_webhook_approval_and_pipeline_variables() -> None:
     template = TEMPLATE.read_text(encoding="utf-8")
 
-    assert "CodeStarSourceConnection" in template
-    assert "ConnectionArn" in template
-    assert "FullRepositoryId" in template
+    assert "Provider: GitHub" in template
+    assert "OAuthToken" in template
+    assert "AWS::CodePipeline::Webhook" in template
+    assert "GITHUB_HMAC" in template
+    assert "admin:repo_hook" in template
     assert "AWS::SNS::Topic" in template
     assert "Provider: Manual" in template
     assert "NotificationArn" in template
@@ -66,8 +68,10 @@ def test_production_parameter_file_has_no_secret_values() -> None:
     parameters = PARAMETERS.read_text(encoding="utf-8")
 
     for name in (
-        "GitHubConnectionArn",
-        "GitHubFullRepositoryId",
+        "GitHubOAuthTokenSecretArn",
+        "GitHubWebhookSecretName",
+        "GitHubOwner",
+        "GitHubRepository",
         "GitHubBranch",
         "EcsServiceArn",
         "EcsExecutionRoleArn",

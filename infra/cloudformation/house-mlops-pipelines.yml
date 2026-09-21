@@ -4,12 +4,18 @@ Description: >-
   Iris/House ECS Express application deployment.
 
 Parameters:
-  GitHubConnectionArn:
+  GitHubOwner:
     Type: String
-    Description: Existing AWS CodeConnections GitHub connection ARN.
-  GitHubFullRepositoryId:
+    Default: DJaegerScript
+  GitHubRepository:
     Type: String
-    Default: DJaegerScript/MLOps-iris-house
+    Default: MLOps-iris-house
+  GitHubOAuthTokenSecretArn:
+    Type: String
+    Description: Secrets Manager ARN containing a GitHub token with repo and admin:repo_hook scopes.
+  GitHubWebhookSecretName:
+    Type: String
+    Default: house-mlops/github-webhook
   GitHubBranch:
     Type: String
     Default: main
@@ -110,6 +116,19 @@ Resources:
       TopicName:
         Fn::Sub: ${AWS::StackName}-house-promotion
 
+  HouseGitHubWebhookSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name:
+        Ref: GitHubWebhookSecretName
+      GenerateSecretString:
+        SecretStringTemplate: '{}'
+        GenerateStringKey: webhook_secret
+        PasswordLength: 48
+        ExcludePunctuation: true
+
   HouseCodePipelineRole:
     Type: AWS::IAM::Role
     Properties:
@@ -156,11 +175,6 @@ Resources:
                   - Fn::GetAtt: [HouseModelPromotionRole, Arn]
                   - Fn::GetAtt: [HouseAppBuildRole, Arn]
                   - Fn::GetAtt: [HouseAppDeployRole, Arn]
-              - Sid: UseConfiguredGitHubConnection
-                Effect: Allow
-                Action: codeconnections:UseConnection
-                Resource:
-                  Ref: GitHubConnectionArn
               - Sid: PublishPromotionNotifications
                 Effect: Allow
                 Action: sns:Publish
@@ -563,17 +577,19 @@ Resources:
             - Name: GitHubSource
               ActionTypeId:
                 Category: Source
-                Owner: AWS
-                Provider: CodeStarSourceConnection
+                Owner: ThirdParty
+                Provider: GitHub
                 Version: '1'
               Configuration:
-                ConnectionArn:
-                  Ref: GitHubConnectionArn
-                FullRepositoryId:
-                  Ref: GitHubFullRepositoryId
-                BranchName:
+                Owner:
+                  Ref: GitHubOwner
+                Repo:
+                  Ref: GitHubRepository
+                Branch:
                   Ref: GitHubBranch
-                OutputArtifactFormat: CODE_ZIP
+                OAuthToken:
+                  Fn::Sub: '{{resolve:secretsmanager:${GitHubOAuthTokenSecretArn}:SecretString:token}}'
+                PollForSourceChanges: 'false'
               OutputArtifacts:
                 - Name: SourceOutput
               RunOrder: 1
@@ -667,31 +683,25 @@ Resources:
           DefaultValue: ''
         - Name: ROLLBACK_REASON
           DefaultValue: ''
-      Triggers:
-        - Provider: CodeStarSourceConnection
-          GitConfiguration:
-            SourceActionName: GitHubSource
-            Push:
-              - Branches:
-                  Includes:
-                    - main
       Stages:
         - Name: Source
           Actions:
             - Name: GitHubSource
               ActionTypeId:
                 Category: Source
-                Owner: AWS
-                Provider: CodeStarSourceConnection
+                Owner: ThirdParty
+                Provider: GitHub
                 Version: '1'
               Configuration:
-                ConnectionArn:
-                  Ref: GitHubConnectionArn
-                FullRepositoryId:
-                  Ref: GitHubFullRepositoryId
-                BranchName:
+                Owner:
+                  Ref: GitHubOwner
+                Repo:
+                  Ref: GitHubRepository
+                Branch:
                   Ref: GitHubBranch
-                OutputArtifactFormat: CODE_ZIP
+                OAuthToken:
+                  Fn::Sub: '{{resolve:secretsmanager:${GitHubOAuthTokenSecretArn}:SecretString:token}}'
+                PollForSourceChanges: 'false'
               OutputArtifacts:
                 - Name: SourceOutput
               RunOrder: 1
@@ -732,6 +742,24 @@ Resources:
                 - Name: SourceOutput
                 - Name: ImageOutput
               RunOrder: 1
+
+  HouseAppGitHubWebhook:
+    Type: AWS::CodePipeline::Webhook
+    Properties:
+      Authentication: GITHUB_HMAC
+      AuthenticationConfiguration:
+        SecretToken:
+          Fn::Sub: '{{resolve:secretsmanager:${HouseGitHubWebhookSecret}:SecretString:webhook_secret}}'
+      Filters:
+        - JsonPath: '$.ref'
+          MatchEquals:
+            Fn::Sub: refs/heads/${GitHubBranch}
+      TargetPipeline:
+        Ref: HouseAppPipeline
+      TargetAction: GitHubSource
+      TargetPipelineVersion:
+        Fn::GetAtt: [HouseAppPipeline, Version]
+      RegisterWithThirdParty: true
 
 Metadata:
   ExistingEcsTaskRoleContract:
