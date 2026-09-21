@@ -92,18 +92,16 @@ phases:
         statements = policy.get("Statement", [])
         if isinstance(statements, dict):
             statements = [statements]
+
+        def as_list(value):
+            return [value] if isinstance(value, str) else value or []
+
         if not any(
             statement.get("Effect") == "Allow"
-            and set(
-                [statement.get("Action")]
-                if isinstance(statement.get("Action"), str)
-                else statement.get("Action", [])
-            ) >= {"s3:GetObject", "s3:GetObjectVersion"}
-            and (
-                [statement.get("Resource")]
-                if isinstance(statement.get("Resource"), str)
-                else statement.get("Resource", [])
-            ) == [expected_resource]
+            and {str(action).strip() for action in as_list(statement.get("Action"))}
+            >= {"s3:GetObject", "s3:GetObjectVersion"}
+            and expected_resource
+            in {unquote(str(resource)).strip() for resource in as_list(statement.get("Resource"))}
             for statement in statements
         ):
             raise SystemExit("task role lacks exact House model read permission")
