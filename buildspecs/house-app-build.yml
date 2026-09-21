@@ -38,10 +38,17 @@ phases:
       - python -m ruff check .
       - |
         set -euo pipefail
+        [[ "${IMAGE_URI_OVERRIDE:-}" == "unset" ]] && unset IMAGE_URI_OVERRIDE
+        [[ "${IMAGE_DIGEST_OVERRIDE:-}" == "unset" ]] && unset IMAGE_DIGEST_OVERRIDE
         if [[ -z "${IMAGE_URI_OVERRIDE:-}" ]]; then
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          export IMAGE_URI="${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${CODEBUILD_RESOLVED_SOURCE_VERSION}"
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin \
+              "${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com"
           docker build --pull --file Dockerfile --tag "$IMAGE_URI" .
           docker push "$IMAGE_URI"
-          IMAGE_DIGEST="$(aws ecr describe-images \
+          export IMAGE_DIGEST="$(aws ecr describe-images \
             --repository-name "$ECR_REPOSITORY" \
             --image-ids "imageTag=${CODEBUILD_RESOLVED_SOURCE_VERSION}" \
             --query 'imageDetails[0].imageDigest' --output text)"
