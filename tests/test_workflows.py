@@ -56,6 +56,7 @@ def test_deployment_workflow_is_main_only_oidc_and_sha_tagged() -> None:
     assert "update-express-gateway-service" in workflow
     assert "list-service-deployments" in workflow
     assert "describe-service-deployments" in workflow
+    assert "previous_deployment_arn" in workflow
     assert "monitor-express-gateway-service" not in workflow
     assert "/_stcore/health" in workflow
     assert "IRIS_MODEL_S3_BUCKET" in workflow
