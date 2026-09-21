@@ -1,0 +1,61 @@
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.12
+    commands:
+      - python -m pip install -r requirements.txt
+  pre_build:
+    commands:
+      - |
+        set -euo pipefail
+        : "${APPROVED_BY:?APPROVED_BY is required}"
+        : "${APPROVAL_REASON:?APPROVAL_REASON is required}"
+        : "${HOUSE_REGISTRY_S3_BUCKET:?HOUSE_REGISTRY_S3_BUCKET is required}"
+        candidate_manifest="$(find "$CODEBUILD_SRC_DIR" -name release_manifest.json -print -quit)"
+        registry_path="$(find "$CODEBUILD_SRC_DIR" -name registry.json -print -quit)"
+        test -n "$candidate_manifest" && test -n "$registry_path"
+        python scripts/codepipeline/validate_house_release.py "$candidate_manifest"
+        registry_version="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["registry_version"])' "$candidate_manifest")"
+        grep -q '"promotion_decisions"' "$registry_path"
+        mkdir -p "$CODEBUILD_SRC_DIR/output"
+  build:
+    commands:
+      - |
+        set -euo pipefail
+        python scripts/promote_house_price_model.py \
+          --registry "$registry_path" \
+          promote \
+          --registry-version "$registry_version" \
+          --approved-by "$APPROVED_BY" \
+          --reason "$APPROVAL_REASON"
+        python -c 'import json,sys; state=json.load(open(sys.argv[1])); record=next(item for item in state["versions"] if item["registry_version"] == sys.argv[2]); json.dump(record["release_manifest"], open(sys.argv[3], "w"), indent=2, sort_keys=True); open(sys.argv[3], "a").write("\n")' \
+          "$registry_path" "$registry_version" \
+          "$CODEBUILD_SRC_DIR/output/approved-release.json"
+        python scripts/codepipeline/validate_house_release.py \
+          "$CODEBUILD_SRC_DIR/output/approved-release.json" \
+          --require-champion
+        aws s3api put-object \
+          --bucket "$HOUSE_REGISTRY_S3_BUCKET" \
+          --key "mlflow/registry/house-price-model/${registry_version}-approved-${CODEBUILD_BUILD_ID}.json" \
+          --body "$CODEBUILD_SRC_DIR/output/approved-release.json" \
+          --server-side-encryption AES256 \
+          --query VersionId --output text
+        python -c 'import json,sys; release=json.load(open(sys.argv[1])); audit={"action":"promote","registry_version":release["registry_version"],"model_version":release["model_version"],"bundle_sha256":release["bundle_sha256"],"model_s3_version_id":release["model_s3_version_id"],"approved_by":sys.argv[2],"approval_reason":sys.argv[3]}; json.dump(audit, open(sys.argv[4], "w"), indent=2, sort_keys=True); open(sys.argv[4], "a").write("\n")' \
+          "$CODEBUILD_SRC_DIR/output/approved-release.json" "$APPROVED_BY" "$APPROVAL_REASON" \
+          "$CODEBUILD_SRC_DIR/output/promotion-audit.json"
+        aws s3api put-object \
+          --bucket "$HOUSE_REGISTRY_S3_BUCKET" \
+          --key "mlflow/registry/house-price-model/${registry_version}-promotion-${CODEBUILD_BUILD_ID}.json" \
+          --body "$CODEBUILD_SRC_DIR/output/promotion-audit.json" \
+          --server-side-encryption AES256 \
+          --query VersionId --output text
+
+artifacts:
+  files:
+    - output/approved-release.json
+    - output/promotion-audit.json

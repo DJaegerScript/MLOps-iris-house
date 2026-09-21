@@ -1,0 +1,73 @@
+version: 0.2
+
+env:
+  shell: bash
+  secrets-manager:
+    MLFLOW_TRACKING_URI: "house-mlops/mlflow:tracking_uri"
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.12
+    commands:
+      - python -m pip install -r requirements-training.txt
+  pre_build:
+    commands:
+      - |
+        set -euo pipefail
+        : "${HOUSE_DATASET_S3_BUCKET:?HOUSE_DATASET_S3_BUCKET is required}"
+        : "${HOUSE_DATASET_S3_KEY:?HOUSE_DATASET_S3_KEY is required}"
+        : "${HOUSE_DATASET_S3_VERSION_ID:?HOUSE_DATASET_S3_VERSION_ID is required}"
+        : "${DATASET_VERSION:?DATASET_VERSION pipeline variable is required}"
+        : "${MODEL_VERSION:?MODEL_VERSION pipeline variable is required}"
+        : "${HOUSE_MODEL_S3_BUCKET:?HOUSE_MODEL_S3_BUCKET is required}"
+        : "${HOUSE_MODEL_S3_KEY:?HOUSE_MODEL_S3_KEY is required}"
+        : "${MLFLOW_TRACKING_URI:?MLFLOW_TRACKING_URI secret is required}"
+        mkdir -p /tmp/house-training "$CODEBUILD_SRC_DIR/output"
+        aws s3api get-object \
+          --bucket "$HOUSE_DATASET_S3_BUCKET" \
+          --key "$HOUSE_DATASET_S3_KEY" \
+          --version-id "$HOUSE_DATASET_S3_VERSION_ID" \
+          /tmp/train.csv >/dev/null
+  build:
+    commands:
+      - |
+        set -euo pipefail
+        python scripts/train_house_price_model.py \
+          --input /tmp/train.csv \
+          --dataset-version "$DATASET_VERSION" \
+          --dataset-s3-bucket "$HOUSE_DATASET_S3_BUCKET" \
+          --dataset-s3-key "$HOUSE_DATASET_S3_KEY" \
+          --dataset-s3-version-id "$HOUSE_DATASET_S3_VERSION_ID" \
+          --output-dir /tmp/house-training \
+          --tracking-uri "$MLFLOW_TRACKING_URI" \
+          --git-commit-sha "$CODEBUILD_RESOLVED_SOURCE_VERSION" \
+          --random-seed 42 \
+          --model-version "$MODEL_VERSION" \
+          --model-s3-bucket "$HOUSE_MODEL_S3_BUCKET" \
+          --model-s3-key "$HOUSE_MODEL_S3_KEY"
+        model_version_id="$(aws s3api put-object \
+          --bucket "$HOUSE_MODEL_S3_BUCKET" \
+          --key "$HOUSE_MODEL_S3_KEY" \
+          --body /tmp/house-training/model.tar.gz \
+          --server-side-encryption AES256 \
+          --query VersionId --output text)"
+        test -n "$model_version_id" && test "$model_version_id" != "None"
+        python scripts/promote_house_price_model.py \
+          --registry /tmp/house-registry.json \
+          register-candidate \
+          --summary /tmp/house-training/training_summary.json \
+          --s3-version-id "$model_version_id" \
+          > /tmp/house-registered.json
+        python scripts/codepipeline/validate_house_release.py \
+          /tmp/house-registered.json
+        cp /tmp/house-registered.json "$CODEBUILD_SRC_DIR/output/release_manifest.json"
+        cp /tmp/house-training/training_summary.json \
+          "$CODEBUILD_SRC_DIR/output/training_summary.json"
+        cp /tmp/house-registry.json "$CODEBUILD_SRC_DIR/output/registry.json"
+
+artifacts:
+  files:
+    - output/release_manifest.json
+    - output/training_summary.json
+    - output/registry.json
