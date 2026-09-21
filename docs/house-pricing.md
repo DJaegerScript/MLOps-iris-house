@@ -144,6 +144,15 @@ Use the `rollback` command with the prior numbered version and an explicit
 reason to restore a known immutable artifact. The registry keeps the prior
 champion, approver, timestamp, and reason in its decision history.
 
+The manual GitHub Actions workflow
+`.github/workflows/train-house-price.yml` reads the exact dataset S3
+`VersionId`, installs the training-only dependencies, logs to the configured
+MLflow tracking URI, uploads the complete bundle, registers a candidate, and
+writes the run/model/version/metric information to the workflow summary. A
+separate protected `house-pricing-production` environment is required before
+the optional promotion job can assign `champion`; training does not deploy the
+application.
+
 ## Application and monitoring
 
 The Streamlit application keeps Iris as the default page and loads House
