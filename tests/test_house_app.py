@@ -155,6 +155,11 @@ def test_house_page_renders_all_declared_inputs_versions_and_prediction(
         if name in {"number_input", "selectbox"}
     ]
     assert input_keys == [*NUMERIC_FEATURES, *CATEGORICAL_FEATURES]
+    assert not any(
+        name == "subheader" and value == "Batch prediction"
+        for name, value in fake_st.calls
+    )
+    assert not any(name == "file_uploader" for name, _ in fake_st.calls)
     assert any(
         name == "success" and "215,000" in str(value)
         for name, value in fake_st.calls
