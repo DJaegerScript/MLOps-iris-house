@@ -14,6 +14,7 @@ Shared resources:
 | ECS cluster | `iris-mlops` |
 | Iris ECS service | `iris-mlops` |
 | House ECS service | `house-pricing` |
+| House endpoint | `https://ho-f7043fa5170848dab5e1df01f8d590ad.ecs.ap-southeast-3.on.aws` |
 | CloudWatch log group | `/aws/ecs/iris-mlops` |
 | House log group | `/aws/ecs/house-pricing` |
 | Region | `ap-southeast-3` |
@@ -153,7 +154,7 @@ coordinates, statuses, counts, and latency:
 
 ```bash
 python scripts/codepipeline/smoke_test_house_release.py \
-  --public-url https://<house-endpoint> \
+  --public-url https://ho-f7043fa5170848dab5e1df01f8d590ad.ecs.ap-southeast-3.on.aws \
   --approved-release /path/to/approved-release.json \
   --image-release /path/to/image-release.json \
   --region ap-southeast-3
@@ -206,16 +207,27 @@ model/dataset/MLflow object versions, and retain the Iris object and shared
 logging/alerting resources unless the whole project is intentionally retired.
 
 The Iris service baseline is intentionally preserved by this House pipeline.
-After the first separated House deployment, append its endpoint, image digest,
-House model `VersionId`, deployment ARN, health result, and smoke summary here.
-The training workflow remains manual and does not retrain during application
+The separated House deployment completed through app-pipeline execution
+`021813df-fa84-48d3-ad56-e41ec711d3fe`:
+
+```text
+House service ARN:       arn:aws:ecs:ap-southeast-3:163918295215:service/iris-mlops/house-pricing
+House deployment ARN:    arn:aws:ecs:ap-southeast-3:163918295215:service-deployment/iris-mlops/house-pricing/EXsdro8Rs9T3dIOLon0qU
+Image digest:             sha256:fcab7377c394878111c37ad4f62b429973470acb19369a262f78c2d64f70a98b
+House model VersionId:    LjgOhvO7DCyHV7KoNMVGyJ0ux2Gui51X
+Health:                   HTTP 200 / ok
+Smoke:                    PASSED
+```
+
+The existing Iris service remains on its original ARN, endpoint, image,
+environment, task role, log group, and `SUCCESSFUL` deployment revision. The
+training workflow remains manual and does not retrain during application
 deployment.
 
 ## Migration status
 
-The separated local implementation and CloudFormation template are validated.
-The existing Iris ECS Express service remains the preservation baseline. The
-House pipeline uses the legacy GitHub OAuth source and webhook required for
-`ap-southeast-3`; its House service creation and deployment evidence are
-recorded after the AWS review checkpoint. No House pipeline action is allowed
-to target the existing `iris-mlops/iris-mlops` service.
+The separated implementation is deployed and verified. CloudFormation stack
+`house-mlops-pipelines` is `UPDATE_COMPLETE`; the House task role, log group,
+service, and endpoint are active. The House pipeline uses the legacy GitHub
+OAuth source and webhook required for `ap-southeast-3`. No House pipeline
+action targets the existing `iris-mlops/iris-mlops` service.
