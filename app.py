@@ -215,11 +215,6 @@ def _render_iris_page() -> None:
 
 def _render_house_page() -> None:
     st.title("House price prediction")
-    st.markdown(
-        "This educational model learns from selected Ames, Iowa features in the "
-        "Kaggle House Prices dataset. It demonstrates validation, preprocessing, "
-        "training provenance, and versioned production serving."
-    )
     try:
         settings = load_house_config()
         runtime = load_house_runtime(settings)

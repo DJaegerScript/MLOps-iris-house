@@ -152,6 +152,14 @@ def test_house_page_renders_all_declared_inputs_versions_and_prediction(
         "House Price Prediction" in str(value)
         for _, value in fake_st.sidebar.calls
     )
+    assert not any(
+        "This educational model learns from selected Ames, Iowa features in the "
+        "Kaggle House Prices dataset. It demonstrates validation, preprocessing, "
+        "training provenance, and versioned production serving."
+        in str(value)
+        for name, value in fake_st.calls
+        if name == "markdown"
+    )
     assert any("educational" in str(value).lower() for name, value in fake_st.calls)
     assert service.inputs is not None
     assert set(service.inputs[0]) == set(NUMERIC_FEATURES + CATEGORICAL_FEATURES)
