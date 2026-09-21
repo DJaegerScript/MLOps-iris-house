@@ -84,6 +84,13 @@ Categorical features:
 
 `Neighborhood`, `KitchenQual`, and `CentralAir`.
 
+The online numeric guardrails are: `OverallQual` from 1 through 10,
+`YearBuilt` from 1800 through 2100, and all other numeric values at least 0.
+These are input safety checks for this educational product, not universal
+real-estate validity rules. Categorical values are required to be non-empty;
+the fitted encoder handles unseen categories and the batch drift report counts
+them.
+
 `Id` is accepted for dataset identity and optional batch output but is never a
 model feature. `SalePrice` is required for training and optional for batch
 prediction. Missing online values are rejected with a field-level validation
@@ -194,6 +201,7 @@ an Ames, Iowa educational-use warning.
 Batch prediction produces `Id` when supplied, `predicted_sale_price`,
 `model_version`, and `prediction_timestamp`. It also calculates a reference
 profile drift score, reports drifted features and unknown categories, and
+shows each per-feature score, invalid-row count, and unknown-category count. It
 warns that one-row input is not a reliable drift sample. Numeric reference
 statistics and categorical distributions are created during training.
 

@@ -94,6 +94,7 @@ def test_prediction_validation_rejects_unexpected_columns() -> None:
 
 def test_single_validation_rejects_missing_and_non_finite_values() -> None:
     values = {feature: 1.0 for feature in NUMERIC_FEATURES}
+    values["YearBuilt"] = 2000.0
     values.update({feature: "known" for feature in CATEGORICAL_FEATURES})
     values.pop("GarageArea")
 
@@ -105,8 +106,30 @@ def test_single_validation_rejects_missing_and_non_finite_values() -> None:
         validate_single_features(values)
 
 
+@pytest.mark.parametrize(
+    ("feature", "value", "message"),
+    [
+        ("OverallQual", 0, "OverallQual must be between 1 and 10"),
+        ("OverallQual", 11, "OverallQual must be between 1 and 10"),
+        ("GrLivArea", -1, "GrLivArea must be at least 0"),
+        ("YearBuilt", 1700, "YearBuilt must be between 1800 and 2100"),
+        ("YearBuilt", 2200, "YearBuilt must be between 1800 and 2100"),
+    ],
+)
+def test_single_validation_rejects_out_of_range_numeric_values(
+    feature: str, value: float, message: str
+) -> None:
+    values = {name: 1.0 for name in NUMERIC_FEATURES}
+    values.update({name: "known" for name in CATEGORICAL_FEATURES})
+    values[feature] = value
+
+    with pytest.raises(SchemaValidationError, match=message):
+        validate_single_features(values)
+
+
 def test_single_validation_returns_declared_order_without_extra_values() -> None:
     values = {feature: 1.0 for feature in NUMERIC_FEATURES}
+    values["YearBuilt"] = 2000.0
     values.update({feature: "known" for feature in CATEGORICAL_FEATURES})
 
     validated = validate_single_features(values)

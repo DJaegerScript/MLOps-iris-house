@@ -28,6 +28,20 @@ CATEGORICAL_FEATURES = ("Neighborhood", "KitchenQual", "CentralAir")
 MODEL_FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 RAW_REQUIRED_COLUMNS = (ID_NAME, *MODEL_FEATURES, TARGET_NAME)
 OPTIONAL_PREDICTION_COLUMNS = (ID_NAME, TARGET_NAME)
+# These are input guardrails for the educational online contract, not claims
+# about universal real-estate validity. Training data remains responsible for
+# its own schema and missing-value policy.
+NUMERIC_FEATURE_RANGES = {
+    "OverallQual": (1.0, 10.0),
+    "GrLivArea": (0.0, None),
+    "GarageCars": (0.0, None),
+    "TotalBsmtSF": (0.0, None),
+    "1stFlrSF": (0.0, None),
+    "YearBuilt": (1800.0, 2100.0),
+    "FullBath": (0.0, None),
+    "TotRmsAbvGrd": (0.0, None),
+    "GarageArea": (0.0, None),
+}
 
 
 class SchemaValidationError(ValueError):
@@ -132,6 +146,19 @@ def validate_single_features(features: object) -> dict[str, Any]:
             numeric_value = float(value)
             if not math.isfinite(numeric_value):
                 raise SchemaValidationError(f"{feature} must be finite")
+            minimum, maximum = NUMERIC_FEATURE_RANGES[feature]
+            if minimum is not None and numeric_value < minimum:
+                if maximum is None:
+                    raise SchemaValidationError(
+                        f"{feature} must be at least {minimum:g}"
+                    )
+                raise SchemaValidationError(
+                    f"{feature} must be between {minimum:g} and {maximum:g}"
+                )
+            if maximum is not None and numeric_value > maximum:
+                raise SchemaValidationError(
+                    f"{feature} must be between {minimum:g} and {maximum:g}"
+                )
             validated[feature] = numeric_value
         else:
             if not isinstance(value, str) or not value.strip():
@@ -214,6 +241,7 @@ __all__ = [
     "ID_NAME",
     "MODEL_FEATURES",
     "MODEL_SCHEMA_VERSION",
+    "NUMERIC_FEATURE_RANGES",
     "NUMERIC_FEATURES",
     "OPTIONAL_PREDICTION_COLUMNS",
     "RAW_REQUIRED_COLUMNS",

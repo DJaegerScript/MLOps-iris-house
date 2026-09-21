@@ -76,6 +76,13 @@ class FakeHouseStreamlit:
     def table(self, value: object) -> None:
         self.calls.append(("table", value))
 
+    def download_button(self, label: str, **kwargs: object) -> None:
+        self.calls.append(("download_button", label))
+
+    def file_uploader(self, label: str, **kwargs: object) -> None:
+        self.calls.append(("file_uploader", label))
+        return None
+
 
 @dataclass
 class FakeHouseService:
@@ -96,6 +103,7 @@ class FakeHouseService:
 @dataclass
 class FakeHouseRuntime:
     service: FakeHouseService
+    batch_service: object = field(default_factory=SimpleNamespace)
     model: object = field(
         default_factory=lambda: SimpleNamespace(
             metrics={},

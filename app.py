@@ -297,11 +297,19 @@ def _render_house_page() -> None:
     )
     if result.metrics is not None:
         st.write({name.upper(): value for name, value in result.metrics.items()})
+    st.write("Per-feature drift scores", result.drift_report.per_feature_scores)
+    st.write("Unknown-category values", result.drift_report.unknown_category_count)
     st.caption(
         f"Rows processed: {result.rows_processed}; "
         f"invalid rows: {result.invalid_row_count}; "
         f"drifted features: {result.drift_report.number_drifted_features}."
     )
+    if result.drift_report.sample_size_warning:
+        st.warning(
+            "This batch is smaller than the educational drift-monitoring "
+            "sample-size guideline; one-row predictions cannot reliably measure "
+            "input drift."
+        )
 
 
 def _house_category_options(model: LoadedHousePriceModel, feature: str) -> list[str]:
