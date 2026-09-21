@@ -45,6 +45,7 @@ def test_deployment_workflow_is_main_only_oidc_and_sha_tagged() -> None:
     assert "role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}" in workflow
     assert "repo:DJaegerScript/MLOps-iris-house:ref:refs/heads/main" in workflow
     assert "github.sha" in workflow
+    assert "environment: production" not in workflow
     assert "docker push" in workflow
     assert "create-express-gateway-service" in workflow
     assert "update-express-gateway-service" in workflow
