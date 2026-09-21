@@ -114,6 +114,36 @@ candidate/model parameters, metrics, duration, and seed. The registry and
 production promotion must remain explicit and approval-gated; training must
 not silently promote a model.
 
+The training command writes a complete `model.tar.gz` bundle containing the
+fitted preprocessing and prediction pipeline plus manifest, metrics, reference
+profile, feature schema, and environment metadata. Register a selected run
+only after the bundle has been uploaded to its immutable model key and the
+returned S3 `VersionId` is known:
+
+```bash
+python scripts/promote_house_price_model.py \
+  --registry /tmp/house-prices/registry.json \
+  register-candidate \
+  --summary /tmp/house-prices/training/training_summary.json \
+  --s3-version-id "$HOUSE_MODEL_S3_VERSION_ID"
+```
+
+Registration creates a numbered version and a `candidate` alias. It never
+creates a mutable `latest` alias and never changes `champion`. Promotion must
+record an approver and reason:
+
+```bash
+python scripts/promote_house_price_model.py \
+  --registry /tmp/house-prices/registry.json \
+  promote --registry-version 1 \
+  --approved-by "operator@example.com" \
+  --reason "Reviewed test metrics and provenance"
+```
+
+Use the `rollback` command with the prior numbered version and an explicit
+reason to restore a known immutable artifact. The registry keeps the prior
+champion, approver, timestamp, and reason in its decision history.
+
 ## Application and monitoring
 
 The Streamlit application keeps Iris as the default page and loads House

@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from house_pricing_mlops.bundle import create_model_bundle
 from house_pricing_mlops.provenance import build_dataset_provenance
 from house_pricing_mlops.schema import SchemaValidationError
 from house_pricing_mlops.tracking import MLflowTracker
@@ -28,6 +29,11 @@ def run_training(
     tracking_uri: str | None = None,
     git_commit_sha: str | None = None,
     random_seed: int = 42,
+    model_name: str = "house-price-model",
+    model_version: str = "v1",
+    model_s3_bucket: str | None = None,
+    model_s3_key: str | None = None,
+    model_s3_version_id: str | None = None,
 ) -> dict[str, object]:
     """Train the fixture or real dataset and write a safe JSON summary."""
 
@@ -54,11 +60,19 @@ def run_training(
     duration = time.perf_counter() - started
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
+    bundle = create_model_bundle(
+        result,
+        provenance,
+        output_path=output_path / "model.tar.gz",
+        model_name=model_name,
+        model_version=model_version,
+    )
     tracker_uri = tracking_uri or (output_path.parent / "mlruns").resolve().as_uri()
     tracked = MLflowTracker(tracker_uri).log(
         result,
         provenance,
         training_duration_seconds=duration,
+        bundle_path=bundle.path,
     )
     summary: dict[str, object] = {
         "dataset_version": provenance.dataset_version,
@@ -75,6 +89,16 @@ def run_training(
         "mlflow_experiment_id": tracked.experiment_id,
         "tracking_uri": tracked.tracking_uri,
         "random_seed": config.random_seed,
+        "model_name": model_name,
+        "model_version": model_version,
+        "bundle_path": str(bundle.path),
+        "bundle_sha256": bundle.bundle_sha256,
+        "s3_object": {
+            "bucket": model_s3_bucket,
+            "key": model_s3_key
+            or f"models/house-price/{model_version}/model.tar.gz",
+            "version_id": model_s3_version_id,
+        },
     }
     (output_path / "training_summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n",
@@ -91,6 +115,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tracking-uri")
     parser.add_argument("--git-commit-sha")
     parser.add_argument("--random-seed", type=int, default=42)
+    parser.add_argument("--model-name", default="house-price-model")
+    parser.add_argument("--model-version", default="v1")
+    parser.add_argument("--model-s3-bucket")
+    parser.add_argument("--model-s3-key")
+    parser.add_argument("--model-s3-version-id")
     return parser
 
 
@@ -104,6 +133,11 @@ def main(argv: list[str] | None = None) -> int:
             tracking_uri=args.tracking_uri,
             git_commit_sha=args.git_commit_sha,
             random_seed=args.random_seed,
+            model_name=args.model_name,
+            model_version=args.model_version,
+            model_s3_bucket=args.model_s3_bucket,
+            model_s3_key=args.model_s3_key,
+            model_s3_version_id=args.model_s3_version_id,
         )
     except TrainingInputError as error:
         print(f"training failed: {error}", file=sys.stderr)

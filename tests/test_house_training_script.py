@@ -35,6 +35,10 @@ def test_training_writes_safe_summary_with_dataset_and_run_provenance(
     assert summary["selected_model"]
     assert summary["mlflow_run_id"]
     assert summary["metrics"]["rmse"] is not None
+    assert summary["model_name"] == "house-price-model"
+    assert summary["model_version"] == "v1"
+    assert summary["bundle_sha256"]
+    assert (tmp_path / "output" / "model.tar.gz").is_file()
     assert (tmp_path / "output" / "training_summary.json").is_file()
 
 
