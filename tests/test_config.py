@@ -3,7 +3,6 @@
 from dataclasses import fields
 
 import pytest
-
 from iris_mlops.config import Settings, load_config
 
 
