@@ -20,6 +20,34 @@
     "ParameterValue": "main"
   },
   {
+    "ParameterKey": "HouseEcsServiceArn",
+    "ParameterValue": "arn:aws:ecs:ap-southeast-3:163918295215:service/iris-mlops/house-pricing"
+  },
+  {
+    "ParameterKey": "HouseEcsServiceName",
+    "ParameterValue": "house-pricing"
+  },
+  {
+    "ParameterKey": "HouseEcsClusterArn",
+    "ParameterValue": "arn:aws:ecs:ap-southeast-3:163918295215:cluster/iris-mlops"
+  },
+  {
+    "ParameterKey": "EcsInfrastructureRoleArn",
+    "ParameterValue": "arn:aws:iam::163918295215:role/iris-mlops-ecs-infrastructure-role"
+  },
+  {
+    "ParameterKey": "HouseEcsTaskRoleArn",
+    "ParameterValue": "arn:aws:iam::163918295215:role/house-mlops-pipelines-house-task"
+  },
+  {
+    "ParameterKey": "HouseCloudWatchLogGroupName",
+    "ParameterValue": "/aws/ecs/house-pricing"
+  },
+  {
+    "ParameterKey": "HousePublicHealthUrl",
+    "ParameterValue": ""
+  },
+  {
     "ParameterKey": "GitHubFullRepositoryId",
     "ParameterValue": "DJaegerScript/MLOps-iris-house"
   },

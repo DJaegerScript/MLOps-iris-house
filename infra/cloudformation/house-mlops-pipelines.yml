@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
-  CodePipeline V2 and scoped CodeBuild roles for the House model and shared
-  Iris/House ECS Express application deployment.
+  CodePipeline V2 and scoped CodeBuild roles for the House model and isolated
+  House ECS Express application deployment.
 
 Parameters:
   GitHubOwner:
@@ -19,6 +19,27 @@ Parameters:
   GitHubBranch:
     Type: String
     Default: main
+  HouseEcsServiceArn:
+    Type: String
+    Default: arn:aws:ecs:ap-southeast-3:163918295215:service/iris-mlops/house-pricing
+  HouseEcsServiceName:
+    Type: String
+    Default: house-pricing
+  HouseEcsClusterArn:
+    Type: String
+    Default: arn:aws:ecs:ap-southeast-3:163918295215:cluster/iris-mlops
+  EcsInfrastructureRoleArn:
+    Type: String
+    Default: arn:aws:iam::163918295215:role/iris-mlops-ecs-infrastructure-role
+  HouseEcsTaskRoleArn:
+    Type: String
+    Default: arn:aws:iam::163918295215:role/house-mlops-pipelines-house-task
+  HouseCloudWatchLogGroupName:
+    Type: String
+    Default: /aws/ecs/house-pricing
+  HousePublicHealthUrl:
+    Type: String
+    Default: ''
   EcsServiceArn:
     Type: String
     Default: arn:aws:ecs:ap-southeast-3:163918295215:service/iris-mlops/iris-mlops
@@ -125,9 +146,47 @@ Resources:
         Ref: GitHubWebhookSecretName
       GenerateSecretString:
         SecretStringTemplate: '{}'
-        GenerateStringKey: webhook_secret
-        PasswordLength: 48
-        ExcludePunctuation: true
+      GenerateStringKey: webhook_secret
+      PasswordLength: 48
+      ExcludePunctuation: true
+
+  HouseCloudWatchLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName:
+        Ref: HouseCloudWatchLogGroupName
+      RetentionInDays: 30
+
+  HouseEcsTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Select:
+          - 1
+          - Fn::Split:
+              - ':role/'
+              - Ref: HouseEcsTaskRoleArn
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: house-pricing-model-read
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadVersionedHouseModel
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:s3:::${HouseModelS3BucketName}/${HouseModelS3Key}
 
   HouseCodePipelineRole:
     Type: AWS::IAM::Role
@@ -377,9 +436,10 @@ Resources:
                 Action: ssm:GetParameter
                 Resource:
                   Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApprovedReleaseParameterName}
-              - Sid: UpdateConfiguredExpressService
+              - Sid: ManageHouseExpressService
                 Effect: Allow
                 Action:
+                  - ecs:CreateExpressGatewayService
                   - ecs:DescribeExpressGatewayService
                   - ecs:DescribeServiceDeployments
                   - ecs:ListServiceDeployments
@@ -389,13 +449,14 @@ Resources:
                 Effect: Allow
                 Action: iam:GetRolePolicy
                 Resource:
-                  Ref: EcsTaskRoleArn
+                  Ref: HouseEcsTaskRoleArn
               - Sid: PassOnlyExistingEcsRoles
                 Effect: Allow
                 Action: iam:PassRole
                 Resource:
                   - Ref: EcsExecutionRoleArn
-                  - Ref: EcsTaskRoleArn
+                  - Ref: EcsInfrastructureRoleArn
+                  - Ref: HouseEcsTaskRoleArn
               - Sid: WriteBuildLogs
                 Effect: Allow
                 Action:
@@ -518,33 +579,32 @@ Resources:
           - Name: AWS_REGION
             Value:
               Ref: AWS::Region
+          - Name: APP_VARIANT
+            Value: house
           - Name: ECS_SERVICE_ARN
             Value:
-              Ref: EcsServiceArn
+              Ref: HouseEcsServiceArn
+          - Name: ECS_SERVICE_NAME
+            Value:
+              Ref: HouseEcsServiceName
+          - Name: ECS_CLUSTER_ARN
+            Value:
+              Ref: HouseEcsClusterArn
           - Name: ECS_EXECUTION_ROLE_ARN
             Value:
               Ref: EcsExecutionRoleArn
           - Name: ECS_TASK_ROLE_ARN
             Value:
-              Ref: EcsTaskRoleArn
-          - Name: IRIS_MODEL_S3_BUCKET
+              Ref: HouseEcsTaskRoleArn
+          - Name: ECS_INFRASTRUCTURE_ROLE_ARN
             Value:
-              Ref: IrisModelS3BucketName
-          - Name: IRIS_MODEL_S3_KEY
-            Value:
-              Ref: IrisModelS3Key
-          - Name: IRIS_MODEL_S3_VERSION_ID
-            Value:
-              Ref: IrisModelS3VersionId
-          - Name: IRIS_MODEL_VERSION
-            Value:
-              Ref: IrisModelVersion
+              Ref: EcsInfrastructureRoleArn
           - Name: CLOUDWATCH_LOG_GROUP
             Value:
-              Ref: CloudWatchLogGroupName
+              Ref: HouseCloudWatchLogGroupName
           - Name: PUBLIC_HEALTH_URL
             Value:
-              Ref: PublicHealthUrl
+              Ref: HousePublicHealthUrl
           - Name: APPROVED_RELEASE_PARAMETER_NAME
             Value:
               Ref: ApprovedReleaseParameterName
@@ -773,9 +833,9 @@ Metadata:
   ExistingEcsTaskRoleContract:
     ManagedExternally: true
     HouseTaskRoleArn:
-      Ref: EcsTaskRoleArn
+      Ref: HouseEcsTaskRoleArn
     RoleArn:
-      Ref: EcsTaskRoleArn
+      Ref: HouseEcsTaskRoleArn
     RequiredPolicyName: house-pricing-model-read
     RequiredStatement:
       Effect: Allow
@@ -798,3 +858,9 @@ Outputs:
   AppPipelineName:
     Value:
       Ref: HouseAppPipeline
+  HouseEcsServiceArn:
+    Value:
+      Ref: HouseEcsServiceArn
+  HouseCloudWatchLogGroupName:
+    Value:
+      Ref: HouseCloudWatchLogGroupName
