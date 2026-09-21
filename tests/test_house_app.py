@@ -128,12 +128,23 @@ def test_house_page_renders_all_declared_inputs_versions_and_prediction(
     fake_st = FakeHouseStreamlit()
     service = FakeHouseService(result=_result())
     settings = SimpleNamespace(model_version="v1", dataset_version="v1")
+    house_model = SimpleNamespace(
+        metrics={
+            "test_metrics": {
+                "mae": 17098.44,
+                "rmse": 27672.43,
+                "r2": 0.8994,
+                "rmsle": 0.1352,
+            }
+        },
+        reference_profile={"categorical": {}},
+    )
     monkeypatch.setattr(app, "st", fake_st)
     monkeypatch.setattr(app, "load_house_config", lambda: settings)
     monkeypatch.setattr(
         app,
         "load_house_runtime",
-        lambda _settings: FakeHouseRuntime(service),
+        lambda _settings: FakeHouseRuntime(service, model=house_model),
     )
 
     app.main()
@@ -160,7 +171,18 @@ def test_house_page_renders_all_declared_inputs_versions_and_prediction(
         for name, value in fake_st.calls
         if name == "markdown"
     )
-    assert any("educational" in str(value).lower() for name, value in fake_st.calls)
+    assert not any(
+        name == "info" and "historical Ames" in str(value)
+        for name, value in fake_st.calls
+    )
+    assert not any(
+        name == "write"
+        and any(
+            label in str(value)
+            for label in ("Test MAE", "Test RMSE", "Test R²", "Test RMSLE")
+        )
+        for name, value in fake_st.calls
+    )
     assert service.inputs is not None
     assert set(service.inputs[0]) == set(NUMERIC_FEATURES + CATEGORICAL_FEATURES)
 

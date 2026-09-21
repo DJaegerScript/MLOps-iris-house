@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -227,12 +226,6 @@ def _render_house_page() -> None:
         f"Dataset version: {settings.dataset_version} | "
         f"Schema: house-price-v1"
     )
-    st.info(
-        "Educational model warning: this model was trained on historical Ames, "
-        "Iowa data and should not be treated as a current appraisal or a model "
-        "for other geographies."
-    )
-    _render_house_metrics(runtime.model.metrics)
 
     st.subheader("Single-property prediction")
     features: dict[str, object] = {}
@@ -313,20 +306,6 @@ def _house_category_options(model: LoadedHousePriceModel, feature: str) -> list[
     except (AttributeError, KeyError, TypeError):
         categories = []
     return [str(category) for category in categories] or ["Known category"]
-
-
-def _render_house_metrics(metrics: Mapping[str, object]) -> None:
-    test_metrics = metrics.get("test_metrics") if isinstance(metrics, Mapping) else None
-    if not isinstance(test_metrics, Mapping):
-        return
-    st.write(
-        {
-            "Test MAE": test_metrics.get("mae"),
-            "Test RMSE": test_metrics.get("rmse"),
-            "Test R²": test_metrics.get("r2"),
-            "Test RMSLE": test_metrics.get("rmsle"),
-        }
-    )
 
 
 def main() -> None:
