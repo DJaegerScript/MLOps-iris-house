@@ -44,6 +44,7 @@ def test_deployment_buildspec_uses_exact_releases_and_house_ecs_express() -> Non
         "HOUSE_MODEL_S3_VERSION_ID",
         "HOUSE_MODEL_VERSION",
         "HOUSE_DATASET_VERSION",
+        "HOUSE_ENVIRONMENT",
         "ECS_SERVICE_ARN",
         "ECS_SERVICE_NAME",
         "ECS_CLUSTER_ARN",
@@ -58,6 +59,7 @@ def test_deployment_buildspec_uses_exact_releases_and_house_ecs_express() -> Non
     assert "aws ecs update-express-gateway-service" in buildspec
     assert '"logStreamPrefix": "house-pricing"' in buildspec
     assert '"name": "APP_VARIANT", "value": "house"' in buildspec
+    assert '"name": "HOUSE_ENVIRONMENT", "value": "production"' in buildspec
     assert 'https://${endpoint}/_stcore/health' in buildspec
     assert '"/_stcore/health"' in buildspec
     assert "wait_for_ecs_express_deployment.sh" in buildspec

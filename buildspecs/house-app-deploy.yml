@@ -150,6 +150,7 @@ phases:
                 {"name": "HOUSE_MODEL_S3_VERSION_ID", "value": os.environ["HOUSE_MODEL_S3_VERSION_ID"]},
                 {"name": "HOUSE_MODEL_VERSION", "value": os.environ["HOUSE_MODEL_VERSION"]},
                 {"name": "HOUSE_DATASET_VERSION", "value": os.environ["HOUSE_DATASET_VERSION"]},
+                {"name": "HOUSE_ENVIRONMENT", "value": "production"},
                 {"name": "GIT_COMMIT_SHA", "value": os.environ["GIT_COMMIT_SHA"]},
                 {"name": "DOCKER_IMAGE_VERSION", "value": os.environ["DOCKER_IMAGE_VERSION"]},
             ],
