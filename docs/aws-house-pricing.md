@@ -25,15 +25,22 @@ mlflow/registry/house-price-model/<immutable-record>.json
 
 The deployed application receives the exact House model S3 key and `VersionId`
 through non-secret GitHub environment variables. The application does not
-load a mutable `latest` object. Record the actual dataset and model `VersionId`
-after operator intake and publication; source control must not invent those
-values.
+load a mutable `latest` object. The verified current coordinates are:
+
+```text
+dataset key:        datasets/house-prices/v1/train.csv
+dataset VersionId:  2IzOEQWUuttBf0c5gkW0X8kR5cr6j7d9
+model key:          models/house-price/v1/model.tar.gz
+model VersionId:    XWYuPZ9y7F2dzZNIubOZML49TgOjKl_D
+model version:      v1
+dataset version:    v1
+```
 
 ## IAM boundary
 
 The existing ECS task role remains responsible for the Iris exact-object read.
-Add a separate inline policy named `house-pricing-model-read` to the same task
-role with only these actions and one exact resource:
+The separate inline policy named `house-pricing-model-read` is installed and
+verified on the same task role with only these actions and one exact resource:
 
 ```json
 {
@@ -98,3 +105,8 @@ Do not delete shared resources during feature verification. For eventual
 cleanup, first confirm ownership, stop the ECS service, remove only the House
 model/dataset/MLflow object versions, and retain the Iris object and shared
 logging/alerting resources unless the whole project is intentionally retired.
+
+The ECS deployment is still pending the explicit candidate-to-champion
+promotion decision. The local AppTest and direct S3 serving checks already
+verified Iris routing, House lazy loading, online prediction, labeled batch
+metrics, and structured logs against the exact model VersionId above.

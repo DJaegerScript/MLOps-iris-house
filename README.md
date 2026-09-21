@@ -64,6 +64,12 @@ to make schema, training, serialization, drift, and Streamlit tests runnable
 without Kaggle or AWS credentials. It is not the real Ames dataset and its
 metrics must not be used as production claims.
 
+The real Kaggle `train.csv` is now versioned privately in S3 as
+`datasets/house-prices/v1/train.csv`; its checksum, S3 VersionId, training run,
+model bundle VersionId, and current candidate/approval status are recorded in
+[`docs/house-pricing.md`](docs/house-pricing.md). ECS production promotion
+remains explicitly approval-gated.
+
 ## Model provenance
 
 The v1 artifact is the educational model published at
