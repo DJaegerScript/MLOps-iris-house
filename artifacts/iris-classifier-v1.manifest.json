@@ -36,6 +36,7 @@
     "label_encoder.pkl": "59c14f9f5ffcd26188226746d0602c8552e0452045e6981138a8e946839ae45c",
     "metadata.pkl": "7557328ea1eaa3c5e5a6bfd509e538a48f7f9e4a8905a0130f2ba6aa677ad05b"
   },
+  "bundle_sha256": "a0da1d85be416055f09551cd3ef1070e21503a24f675c2dfd7077b27262a35dd",
   "training_metrics": {
     "algorithm": "LDA",
     "probabilities_supported": true,

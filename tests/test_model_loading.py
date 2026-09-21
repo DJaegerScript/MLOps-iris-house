@@ -10,11 +10,15 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 
+import iris_mlops.model as model_module
 from iris_mlops.manifest import ModelManifest, load_manifest
 from iris_mlops.model import (
     ArtifactIntegrityError,
     ArtifactLoadError,
+    load_model_from_s3,
     load_verified_model,
 )
 from iris_mlops.storage import S3ArtifactStore
@@ -29,58 +33,65 @@ ARTIFACT_NAMES = (
 )
 
 
-class LinearDiscriminantAnalysis:
-    """Small test double named like the allowed serialized estimator."""
+def _untrained_objects() -> dict[str, object]:
+    model = LinearDiscriminantAnalysis()
+    model.classes_ = (0, 1, 2)
+    model.n_features_in_ = 4
 
-    classes_ = (0, 1, 2)
-    n_features_in_ = 4
+    scaler = StandardScaler()
+    scaler.n_features_in_ = 4
 
-    def predict(self, features: object) -> list[int]:
-        raise AssertionError("prediction is not part of this loading test")
-
-    def predict_proba(self, features: object) -> list[list[float]]:
-        raise AssertionError("prediction is not part of this loading test")
-
-
-class StandardScaler:
-    n_features_in_ = 4
-
-    def transform(self, features: object) -> object:
-        return features
-
-
-class LabelEncoder:
-    classes_ = ("Iris-setosa", "Iris-versicolor", "Iris-virginica")
-
-    def inverse_transform(self, values: list[int]) -> list[str]:
-        return [self.classes_[value] for value in values]
-
-
-class Metadata:
-    pass
+    label_encoder = LabelEncoder()
+    label_encoder.classes_ = (
+        "Iris-setosa",
+        "Iris-versicolor",
+        "Iris-virginica",
+    )
+    return {
+        "iris_model.pkl": model,
+        "scaler.pkl": scaler,
+        "label_encoder.pkl": label_encoder,
+    }
 
 
 def _bundle(
-    members: dict[str, bytes], extra: list[tarfile.TarInfo] | None = None
+    members: dict[str, bytes],
+    extra: list[tarfile.TarInfo] | None = None,
+    *,
+    member_mtime: int = 0,
 ) -> bytes:
     stream = io.BytesIO()
     with tarfile.open(fileobj=stream, mode="w:gz") as archive:
         for name, payload in members.items():
             info = tarfile.TarInfo(name)
             info.size = len(payload)
+            info.mtime = member_mtime
             archive.addfile(info, io.BytesIO(payload))
         for info in extra or []:
             archive.addfile(info)
     return stream.getvalue()
 
 
-def _manifest_for(members: dict[str, bytes]) -> ModelManifest:
+def _manifest_for(
+    checksum_members: dict[str, bytes],
+    bundle: bytes,
+    monkeypatch: pytest.MonkeyPatch,
+) -> ModelManifest:
     manifest = load_manifest(MANIFEST_PATH)
+    checksums = {
+        name: hashlib.sha256(checksum_members[name]).hexdigest()
+        for name in ARTIFACT_NAMES
+    }
+    trusted = replace(
+        model_module.V1_EXPECTATIONS,
+        artifact_checksums=checksums,
+        bundle_sha256=hashlib.sha256(bundle).hexdigest(),
+    )
+    monkeypatch.setattr(model_module, "V1_EXPECTATIONS", trusted)
     return replace(
         manifest,
-        artifact_checksums={
-            name: hashlib.sha256(members[name]).hexdigest() for name in ARTIFACT_NAMES
-        },
+        artifact_checksums=checksums,
+        bundle_sha256=trusted.bundle_sha256,
     )
 
 
@@ -105,29 +116,48 @@ def test_s3_store_gets_only_the_explicit_versioned_object() -> None:
     client.assert_not_called()
 
 
-def test_loader_checks_every_member_before_deserializing() -> None:
+def test_loader_checks_every_member_before_deserializing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     members = _valid_members()
-    manifest = _manifest_for(members)
-    members["scaler.pkl"] = b"tampered"
+    tampered_members = dict(members)
+    tampered_members["scaler.pkl"] = b"tampered"
+    bundle = _bundle(tampered_members)
+    manifest = _manifest_for(members, bundle, monkeypatch)
     deserializer = Mock()
 
     with pytest.raises(ArtifactIntegrityError, match="scaler.pkl"):
-        load_verified_model(_bundle(members), manifest, deserializer=deserializer)
+        load_verified_model(bundle, manifest, deserializer=deserializer)
 
     deserializer.assert_not_called()
 
 
-def test_loader_deserializes_only_allowed_objects_from_in_memory_streams() -> None:
+def test_loader_checks_bundle_hash_before_member_deserialization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     members = _valid_members()
-    manifest = _manifest_for(members)
-    objects = {
-        "iris_model.pkl": LinearDiscriminantAnalysis(),
-        "scaler.pkl": StandardScaler(),
-        "label_encoder.pkl": LabelEncoder(),
-    }
+    bundle = _bundle(members)
+    manifest = _manifest_for(members, bundle, monkeypatch)
+    deserializer = Mock()
+
+    with pytest.raises(ArtifactIntegrityError, match="bundle checksum"):
+        load_verified_model(
+            _bundle(members, member_mtime=1), manifest, deserializer=deserializer
+        )
+
+    deserializer.assert_not_called()
+
+
+def test_loader_deserializes_only_allowed_objects_from_in_memory_streams(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    members = _valid_members()
+    bundle = _bundle(members)
+    manifest = _manifest_for(members, bundle, monkeypatch)
+    objects = _untrained_objects()
     deserializer = Mock(side_effect=[objects[name] for name in objects])
 
-    loaded = load_verified_model(_bundle(members), manifest, deserializer=deserializer)
+    loaded = load_verified_model(bundle, manifest, deserializer=deserializer)
 
     assert loaded.model is objects["iris_model.pkl"]
     assert loaded.scaler is objects["scaler.pkl"]
@@ -137,7 +167,8 @@ def test_loader_deserializes_only_allowed_objects_from_in_memory_streams() -> No
     assert all(
         isinstance(call.args[0], io.BytesIO) for call in deserializer.call_args_list
     )
-    assert all(not hasattr(obj, "fit") for obj in objects.values())
+    assert not hasattr(objects["iris_model.pkl"], "coef_")
+    assert not hasattr(objects["scaler.pkl"], "mean_")
 
 
 @pytest.mark.parametrize(
@@ -160,7 +191,9 @@ def test_loader_deserializes_only_allowed_objects_from_in_memory_streams() -> No
         ),
     ],
 )
-def test_loader_rejects_unsafe_tar_members(name, member_factory, message) -> None:
+def test_loader_rejects_unsafe_tar_members(
+    name, member_factory, message, monkeypatch: pytest.MonkeyPatch
+) -> None:
     members = _valid_members()
     extra = []
     if message == "symlink":
@@ -173,24 +206,83 @@ def test_loader_rejects_unsafe_tar_members(name, member_factory, message) -> Non
         members.pop("iris_model.pkl")
         members[name] = b"unsafe"
 
-    manifest = _manifest_for(_valid_members())
+    bundle = _bundle(members, extra)
+    manifest = _manifest_for(_valid_members(), bundle, monkeypatch)
 
     with pytest.raises(ArtifactLoadError, match=message):
-        load_verified_model(_bundle(members, extra), manifest)
+        load_verified_model(bundle, manifest)
 
 
-def test_loader_rejects_hardlinks_unexpected_members_and_missing_members() -> None:
+def test_loader_rejects_unexpected_regular_members(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    members = _valid_members()
+    unexpected = tarfile.TarInfo("unexpected.pkl")
+    unexpected.size = 0
+    bundle = _bundle(members, [unexpected])
+    manifest = _manifest_for(members, bundle, monkeypatch)
+
+    with pytest.raises(ArtifactLoadError, match="unexpected artifact member"):
+        load_verified_model(bundle, manifest)
+
+
+def test_loader_rejects_hardlinks_unexpected_members_and_missing_members(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     members = _valid_members()
     link = tarfile.TarInfo("unexpected.pkl")
     link.type = tarfile.LNKTYPE
     link.linkname = "iris_model.pkl"
 
+    hardlink_bundle = _bundle(members, [link])
+    hardlink_manifest = _manifest_for(members, hardlink_bundle, monkeypatch)
     with pytest.raises(ArtifactLoadError, match="hardlink"):
-        load_verified_model(_bundle(members, [link]), _manifest_for(members))
+        load_verified_model(hardlink_bundle, hardlink_manifest)
 
     members.pop("metadata.pkl")
+    missing_bundle = _bundle(members)
+    missing_manifest = _manifest_for(_valid_members(), missing_bundle, monkeypatch)
     with pytest.raises(ArtifactLoadError, match="missing"):
-        load_verified_model(_bundle(members), _manifest_for(_valid_members()))
+        load_verified_model(missing_bundle, missing_manifest)
+
+
+def test_loader_rejects_a_forged_manifest_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    members = _valid_members()
+    bundle = _bundle(members)
+    manifest = _manifest_for(members, bundle, monkeypatch)
+
+    forged = replace(manifest, source_revision="forged-revision")
+
+    with pytest.raises(ArtifactIntegrityError, match="trusted"):
+        load_verified_model(bundle, forged)
+
+
+def test_load_model_from_s3_wires_the_versioned_store_to_the_loader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    members = _valid_members()
+    bundle = _bundle(members)
+    manifest = _manifest_for(members, bundle, monkeypatch)
+    objects = _untrained_objects()
+    deserializer = Mock(side_effect=[objects[name] for name in objects])
+    store = Mock()
+    store.get_versioned_object.return_value = bundle
+
+    loaded = load_model_from_s3(
+        store,
+        "private-iris-bucket",
+        "models/iris/v1.tar.gz",
+        "version-123",
+        manifest,
+        deserializer=deserializer,
+    )
+
+    store.get_versioned_object.assert_called_once_with(
+        "private-iris-bucket", "models/iris/v1.tar.gz", "version-123"
+    )
+    assert loaded.model is objects["iris_model.pkl"]
 
 
 def test_loader_rejects_a_manifest_that_is_not_the_validated_v1_type() -> None:

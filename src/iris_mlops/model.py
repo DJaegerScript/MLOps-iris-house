@@ -7,12 +7,14 @@ import hmac
 import io
 import math
 import tarfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any, BinaryIO, Protocol
 
 import joblib
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 from iris_mlops.manifest import V1_EXPECTATIONS, ModelManifest
 
@@ -90,14 +92,10 @@ class LoadedIrisModel:
         predicted_class = _normalize_label(source_label)
 
         probabilities = self.model.predict_proba(transformed)
-        rows = _rows(probabilities)
-        if len(rows) != 1 or len(rows[0]) != len(self.classes):
-            raise ArtifactSchemaError(
-                "predict_proba must return one row with three classes"
-            )
+        columns = _probability_columns(probabilities, len(self.classes))
 
         probability_values: list[float] = []
-        for value in rows[0]:
+        for value in columns:
             try:
                 numeric_value = float(value)
             except (TypeError, ValueError) as error:
@@ -129,6 +127,9 @@ def load_verified_model(
     _validate_manifest_for_loading(manifest)
     if not isinstance(bundle_bytes, bytes):
         raise ArtifactLoadError("model bundle must be provided as bytes")
+    actual_bundle_sha256 = hashlib.sha256(bundle_bytes).hexdigest()
+    if not hmac.compare_digest(actual_bundle_sha256, manifest.bundle_sha256):
+        raise ArtifactIntegrityError("bundle checksum mismatch")
 
     members = _read_verified_members(bundle_bytes, manifest.artifact_checksums)
     load = joblib.load if deserializer is None else deserializer
@@ -169,21 +170,54 @@ def _validate_manifest_for_loading(manifest: object) -> None:
     if not isinstance(manifest, ModelManifest):
         raise ArtifactLoadError("a validated v1 manifest is required")
 
-    if tuple(manifest.features) != V1_EXPECTATIONS.features:
+    expectations = V1_EXPECTATIONS
+    try:
+        features = tuple(manifest.features)
+        classes = tuple(manifest.classes)
+    except TypeError as error:
+        raise ArtifactSchemaError(
+            "manifest feature and class schema is invalid"
+        ) from error
+    if features != expectations.features:
         raise ArtifactSchemaError("manifest feature schema is not the Iris v1 schema")
-    if tuple(manifest.classes) != NORMALIZED_LABELS:
+    if classes != expectations.classes:
         raise ArtifactSchemaError("manifest class schema is not the Iris v1 schema")
 
     normalization = manifest.class_label_normalization
+    if not isinstance(normalization, Mapping):
+        raise ArtifactSchemaError("manifest source label normalization is invalid")
     if (
         tuple(normalization.get("source_labels", ())) != SOURCE_LABELS
-        or tuple(normalization.get("manifest_labels", ())) != NORMALIZED_LABELS
+        or tuple(normalization.get("manifest_labels", ())) != expectations.classes
+        or normalization.get("rule")
+        != expectations.class_label_normalization["rule"]
+        or dict(normalization) != dict(expectations.class_label_normalization)
     ):
         raise ArtifactSchemaError("manifest source labels do not normalize correctly")
 
+    if (
+        manifest.model_name != expectations.model_name
+        or manifest.model_version != expectations.model_version
+        or manifest.source != expectations.source
+        or manifest.source_revision != expectations.source_revision
+        or manifest.framework != expectations.framework
+        or manifest.framework_version != expectations.framework_version
+        or manifest.python_version != expectations.python_version
+        or manifest.training_metrics != expectations.training_metrics
+    ):
+        raise ArtifactIntegrityError("manifest does not match trusted v1 identity")
+
     checksums = manifest.artifact_checksums
+    if not isinstance(checksums, Mapping):
+        raise ArtifactIntegrityError("manifest artifact checksums are invalid")
     if set(checksums) != set(ARTIFACT_NAMES):
         raise ArtifactIntegrityError("manifest checksums must cover the four artifacts")
+    if dict(checksums) != dict(expectations.artifact_checksums):
+        raise ArtifactIntegrityError(
+            "manifest checksums do not match trusted v1 manifest"
+        )
+    if manifest.bundle_sha256 != expectations.bundle_sha256:
+        raise ArtifactIntegrityError("manifest bundle checksum is not trusted")
     for name in ARTIFACT_NAMES:
         checksum = checksums[name]
         if not isinstance(checksum, str) or len(checksum) != 64:
@@ -267,23 +301,23 @@ def _validate_tar_member(member: tarfile.TarInfo) -> None:
 def _validate_deserialized_artifacts(
     model: object, scaler: object, encoder: object
 ) -> None:
+    if not isinstance(model, LinearDiscriminantAnalysis):
+        raise ArtifactSchemaError(
+            "iris_model.pkl must contain a LinearDiscriminantAnalysis"
+        )
     if not callable(getattr(model, "predict", None)):
         raise ArtifactSchemaError("LDA model must support predict")
     if not callable(getattr(model, "predict_proba", None)):
         raise ArtifactSchemaError("LDA model must support predict_proba")
-    if type(model).__name__ != "LinearDiscriminantAnalysis":
-        raise ArtifactSchemaError(
-            "iris_model.pkl must contain a LinearDiscriminantAnalysis"
-        )
     if getattr(model, "n_features_in_", None) != 4:
         raise ArtifactSchemaError("LDA must have four features")
-    if type(scaler).__name__ != "StandardScaler":
+    if not isinstance(scaler, StandardScaler):
         raise ArtifactSchemaError("scaler.pkl must contain a StandardScaler")
     if getattr(scaler, "n_features_in_", None) != 4:
         raise ArtifactSchemaError("StandardScaler must have four features")
     if not callable(getattr(scaler, "transform", None)):
         raise ArtifactSchemaError("StandardScaler must support transform")
-    if type(encoder).__name__ != "LabelEncoder":
+    if not isinstance(encoder, LabelEncoder):
         raise ArtifactSchemaError("label_encoder.pkl must contain a LabelEncoder")
     if tuple(getattr(encoder, "classes_", ())) != SOURCE_LABELS:
         raise ArtifactSchemaError(
@@ -318,11 +352,30 @@ def _first_value(values: object, field: str) -> object:
         raise ArtifactSchemaError(f"{field} returned no values") from error
 
 
-def _rows(values: object) -> list[Sequence[object]]:
+def _probability_columns(values: object, expected_columns: int) -> list[object]:
+    shape_message = (
+        "predict_proba must have exact rank-2 shape "
+        f"(1, {expected_columns}) with three classes"
+    )
+    if isinstance(values, (str, bytes, Mapping)):
+        raise ArtifactSchemaError(shape_message)
     try:
-        return list(values)  # type: ignore[arg-type]
-    except TypeError as error:
-        raise ArtifactSchemaError("predict_proba must return rows") from error
+        rows = list(values)  # type: ignore[arg-type]
+    except (AttributeError, TypeError, ValueError) as error:
+        raise ArtifactSchemaError(shape_message) from error
+    if len(rows) != 1:
+        raise ArtifactSchemaError(shape_message)
+
+    row = rows[0]
+    if isinstance(row, (str, bytes, Mapping)):
+        raise ArtifactSchemaError(shape_message)
+    try:
+        columns = list(row)  # type: ignore[arg-type]
+    except (AttributeError, TypeError, ValueError) as error:
+        raise ArtifactSchemaError(shape_message) from error
+    if len(columns) != expected_columns:
+        raise ArtifactSchemaError(shape_message)
+    return columns
 
 
 __all__ = [

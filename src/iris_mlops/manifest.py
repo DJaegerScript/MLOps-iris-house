@@ -22,6 +22,7 @@ _TOP_LEVEL_FIELDS = (
     "framework_version",
     "python_version",
     "artifact_checksums",
+    "bundle_sha256",
     "training_metrics",
 )
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -63,6 +64,7 @@ class V1ManifestExpectations:
     framework_version: str
     python_version: str
     artifact_checksums: Mapping[str, str]
+    bundle_sha256: str
     training_metrics: Mapping[str, object]
 
 
@@ -103,6 +105,9 @@ V1_EXPECTATIONS = V1ManifestExpectations(
                 "7557328ea1eaa3c5e5a6bfd509e538a48f7f9e4a8905a0130f2ba6aa677ad05b"
             ),
         }
+    ),
+    bundle_sha256=(
+        "a0da1d85be416055f09551cd3ef1070e21503a24f675c2dfd7077b27262a35dd"
     ),
     training_metrics=MappingProxyType(
         {
@@ -145,6 +150,7 @@ class ModelManifest:
     framework_version: str
     python_version: str
     artifact_checksums: Mapping[str, str]
+    bundle_sha256: str
     training_metrics: Mapping[str, object]
 
 
@@ -264,6 +270,15 @@ def _validate_artifact_checksums(value: object) -> Mapping[str, str]:
     )
 
 
+def _validate_bundle_sha256(value: object) -> str:
+    field = "bundle_sha256"
+    if not isinstance(value, str) or not _SHA256_PATTERN.fullmatch(value):
+        raise ValueError(f"{field}: is not a valid sha-256 checksum")
+    if value != V1_EXPECTATIONS.bundle_sha256:
+        raise ValueError(f"{field}: does not match the verified sha-256 checksum")
+    return value
+
+
 def _validate_training_metrics(value: object) -> Mapping[str, object]:
     field = "training_metrics"
     metrics = _require_mapping(value, field)
@@ -315,6 +330,7 @@ def validate_v1_manifest(payload: Mapping[str, object]) -> ModelManifest:
             expectations.python_version,
         ),
         artifact_checksums=_validate_artifact_checksums(manifest["artifact_checksums"]),
+        bundle_sha256=_validate_bundle_sha256(manifest["bundle_sha256"]),
         training_metrics=_validate_training_metrics(manifest["training_metrics"]),
     )
 

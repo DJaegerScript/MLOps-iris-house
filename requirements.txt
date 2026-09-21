@@ -1,4 +1,7 @@
 # Runtime dependencies for the S3-backed, pre-trained Iris artifact loader.
-boto3>=1.35,<2
-joblib>=1.4,<2
-scikit-learn>=1.8,<1.9
+boto3==1.43.98
+joblib==1.5.3
+numpy==2.3.3
+scipy==1.17.1
+scikit-learn==1.8.0
+threadpoolctl==3.7.0

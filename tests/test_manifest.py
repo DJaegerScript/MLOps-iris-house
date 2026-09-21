@@ -33,6 +33,9 @@ EXPECTED_ARTIFACT_CHECKSUMS = {
     ),
     "metadata.pkl": "7557328ea1eaa3c5e5a6bfd509e538a48f7f9e4a8905a0130f2ba6aa677ad05b",
 }
+EXPECTED_BUNDLE_SHA256 = (
+    "a0da1d85be416055f09551cd3ef1070e21503a24f675c2dfd7077b27262a35dd"
+)
 REQUIRED_FIELDS = (
     "model_name",
     "model_version",
@@ -45,6 +48,7 @@ REQUIRED_FIELDS = (
     "framework_version",
     "python_version",
     "artifact_checksums",
+    "bundle_sha256",
     "training_metrics",
 )
 
@@ -81,6 +85,7 @@ def test_manifest_loads_the_complete_metadata_contract() -> None:
     assert manifest.framework_version == "1.8.0"
     assert manifest.python_version == "not reported by source"
     assert manifest.artifact_checksums == EXPECTED_ARTIFACT_CHECKSUMS
+    assert manifest.bundle_sha256 == EXPECTED_BUNDLE_SHA256
     assert manifest.training_metrics == {
         "algorithm": "LDA",
         "probabilities_supported": True,
@@ -164,6 +169,17 @@ def test_manifest_requires_valid_sha256_artifact_checksums(
 ) -> None:
     payload = _manifest_payload()
     payload["artifact_checksums"]["iris_model.pkl"] = checksum
+
+    with pytest.raises(ValueError, match="sha-256"):
+        manifest_api.validate_manifest(payload)
+
+
+@pytest.mark.parametrize("checksum", ["", "not-a-sha256", "0" * 63, "g" * 64])
+def test_manifest_requires_valid_sha256_bundle_checksum(
+    manifest_api, checksum: str
+) -> None:
+    payload = _manifest_payload()
+    payload["bundle_sha256"] = checksum
 
     with pytest.raises(ValueError, match="sha-256"):
         manifest_api.validate_manifest(payload)
