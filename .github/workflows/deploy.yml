@@ -1,0 +1,202 @@
+name: Deploy Iris MLOps application
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# The IAM role trust policy must require both:
+#   aud = sts.amazonaws.com
+#   sub = repo:DJaegerScript@85334514/MLOps-iris-house@1378975661:ref:refs/heads/main
+# This workflow intentionally uses short-lived GitHub OIDC credentials only;
+# do not replace AWS_DEPLOY_ROLE_ARN with an access key or static secret.
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: iris-mlops-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-3' }}
+  AWS_DEPLOY_ROLE_ARN: ${{ vars.IRIS_AWS_DEPLOY_ROLE_ARN }}
+  ECR_REPOSITORY: ${{ vars.IRIS_ECR_REPOSITORY || 'iris-mlops' }}
+  ECS_SERVICE_ARN: ${{ vars.IRIS_ECS_SERVICE_ARN }}
+  ECS_SERVICE_NAME: ${{ vars.IRIS_ECS_SERVICE_NAME || 'iris-mlops' }}
+  ECS_EXECUTION_ROLE_ARN: ${{ vars.IRIS_ECS_EXECUTION_ROLE_ARN }}
+  ECS_INFRASTRUCTURE_ROLE_ARN: ${{ vars.IRIS_ECS_INFRASTRUCTURE_ROLE_ARN }}
+  ECS_TASK_ROLE_ARN: ${{ vars.IRIS_ECS_TASK_ROLE_ARN }}
+  CLOUDWATCH_LOG_GROUP: ${{ vars.IRIS_CLOUDWATCH_LOG_GROUP || '/aws/ecs/iris-mlops' }}
+  IRIS_MODEL_S3_BUCKET: ${{ vars.IRIS_MODEL_S3_BUCKET }}
+  IRIS_MODEL_S3_KEY: ${{ vars.IRIS_MODEL_S3_KEY }}
+  IRIS_MODEL_S3_VERSION_ID: ${{ vars.IRIS_MODEL_S3_VERSION_ID }}
+  IRIS_MODEL_VERSION: ${{ vars.IRIS_MODEL_VERSION || 'v1' }}
+  IRIS_ENVIRONMENT: ${{ vars.IRIS_ENVIRONMENT || 'production' }}
+  LOW_CONFIDENCE_THRESHOLD: ${{ vars.LOW_CONFIDENCE_THRESHOLD || '0.80' }}
+
+jobs:
+  deploy:
+    name: Build, push, and deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials through GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-actions-${{ github.run_id }}
+
+      - name: Resolve image URI
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          image_uri="${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${GITHUB_SHA}"
+          echo "image_uri=${image_uri}" >> "${GITHUB_OUTPUT}"
+          echo "image_tag=${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
+          if aws ecr describe-images \
+            --repository-name "${ECR_REPOSITORY}" \
+            --image-ids "imageTag=${GITHUB_SHA}" \
+            --region "${AWS_REGION}" >/dev/null 2>&1; then
+            echo "image_exists=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "image_exists=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push commit-tagged image
+        env:
+          IMAGE_URI: ${{ steps.image.outputs.image_uri }}
+          IMAGE_EXISTS: ${{ steps.image.outputs.image_exists }}
+        run: |
+          set -euo pipefail
+          if [[ "${IMAGE_EXISTS}" == "true" ]]; then
+            echo "Immutable image tag already exists; reusing ${IMAGE_URI}."
+          else
+            docker build --pull --file Dockerfile --tag "${IMAGE_URI}" .
+            docker push "${IMAGE_URI}"
+          fi
+
+      - name: Create or update ECS Express Mode service
+        env:
+          IMAGE_URI: ${{ steps.image.outputs.image_uri }}
+          GIT_COMMIT_SHA: ${{ github.sha }}
+          DOCKER_IMAGE_VERSION: ${{ steps.image.outputs.image_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          : "${AWS_DEPLOY_ROLE_ARN:?Set repository variable IRIS_AWS_DEPLOY_ROLE_ARN}"
+          : "${IRIS_MODEL_S3_BUCKET:?Set repository variable IRIS_MODEL_S3_BUCKET}"
+          : "${IRIS_MODEL_S3_KEY:?Set repository variable IRIS_MODEL_S3_KEY}"
+          : "${IRIS_MODEL_S3_VERSION_ID:?Set repository variable IRIS_MODEL_S3_VERSION_ID}"
+          : "${ECS_EXECUTION_ROLE_ARN:?Set repository variable IRIS_ECS_EXECUTION_ROLE_ARN}"
+          : "${ECS_INFRASTRUCTURE_ROLE_ARN:?Set repository variable IRIS_ECS_INFRASTRUCTURE_ROLE_ARN}"
+          : "${ECS_TASK_ROLE_ARN:?Set repository variable IRIS_ECS_TASK_ROLE_ARN}"
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          primary_container = {
+              "image": os.environ["IMAGE_URI"],
+              "containerPort": 8501,
+              "awsLogsConfiguration": {
+                  "logGroup": os.environ["CLOUDWATCH_LOG_GROUP"],
+                  "logStreamPrefix": "iris-mlops",
+              },
+              "environment": [
+                  {"name": "IRIS_MODEL_S3_BUCKET", "value": os.environ["IRIS_MODEL_S3_BUCKET"]},
+                  {"name": "IRIS_MODEL_S3_KEY", "value": os.environ["IRIS_MODEL_S3_KEY"]},
+                  {"name": "IRIS_MODEL_S3_VERSION_ID", "value": os.environ["IRIS_MODEL_S3_VERSION_ID"]},
+                  {"name": "IRIS_MODEL_VERSION", "value": os.environ["IRIS_MODEL_VERSION"]},
+                  {"name": "IRIS_ENVIRONMENT", "value": os.environ["IRIS_ENVIRONMENT"]},
+                  {"name": "GIT_COMMIT_SHA", "value": os.environ["GIT_COMMIT_SHA"]},
+                  {"name": "DOCKER_IMAGE_VERSION", "value": os.environ["DOCKER_IMAGE_VERSION"]},
+                  {"name": "LOW_CONFIDENCE_THRESHOLD", "value": os.environ["LOW_CONFIDENCE_THRESHOLD"]},
+              ],
+          }
+          Path("/tmp/iris-primary-container.json").write_text(
+              json.dumps(primary_container), encoding="utf-8"
+          )
+          PY
+
+          previous_deployment_arn=""
+          if [[ -n "${ECS_SERVICE_ARN}" ]]; then
+            previous_deployment_arn="$(aws ecs list-service-deployments \
+              --service "${ECS_SERVICE_ARN}" \
+              --query 'serviceDeployments[0].serviceDeploymentArn' \
+              --output text)"
+            aws ecs update-express-gateway-service \
+              --service-arn "${ECS_SERVICE_ARN}" \
+              --execution-role-arn "${ECS_EXECUTION_ROLE_ARN}" \
+              --task-role-arn "${ECS_TASK_ROLE_ARN}" \
+              --primary-container file:///tmp/iris-primary-container.json \
+              --health-check-path "/_stcore/health"
+            service_arn="${ECS_SERVICE_ARN}"
+          else
+            aws ecs create-express-gateway-service \
+              --service-name "${ECS_SERVICE_NAME}" \
+              --execution-role-arn "${ECS_EXECUTION_ROLE_ARN}" \
+              --infrastructure-role-arn "${ECS_INFRASTRUCTURE_ROLE_ARN}" \
+              --task-role-arn "${ECS_TASK_ROLE_ARN}" \
+              --primary-container file:///tmp/iris-primary-container.json \
+              --health-check-path "/_stcore/health" \
+              --output json > /tmp/iris-express-service.json
+            service_arn="$(jq -r '.service.serviceArn' /tmp/iris-express-service.json)"
+          fi
+
+          deployment_arn=""
+          deployment_status=""
+          for attempt in {1..40}; do
+            deployment_arn="$(aws ecs list-service-deployments \
+              --service "${service_arn}" \
+              --query 'serviceDeployments[0].serviceDeploymentArn' \
+              --output text)"
+            if [[ -z "${deployment_arn}" || "${deployment_arn}" == "None" || "${deployment_arn}" == "${previous_deployment_arn}" ]]; then
+              if [[ "${attempt}" -eq 40 ]]; then
+                echo "Timed out waiting for a new ECS deployment for ${service_arn}." >&2
+                exit 1
+              fi
+              sleep 15
+              continue
+            fi
+            deployment_status="$(aws ecs describe-service-deployments \
+              --service-deployment-arns "${deployment_arn}" \
+              --query 'serviceDeployments[0].status' \
+              --output text)"
+            case "${deployment_status}" in
+              SUCCESSFUL)
+                break
+                ;;
+              FAILED|STOPPED)
+                echo "ECS deployment ${deployment_arn} ended with status ${deployment_status}." >&2
+                exit 1
+                ;;
+            esac
+            if [[ "${attempt}" -eq 40 ]]; then
+              echo "Timed out waiting for ECS deployment ${deployment_arn}; last status: ${deployment_status}." >&2
+              exit 1
+            fi
+            sleep 15
+          done
+
+          endpoint="$(aws ecs describe-express-gateway-service \
+            --service-arn "${service_arn}" \
+            --query 'service.activeConfigurations[0].ingressPaths[0].endpoint' \
+            --output text)"
+          {
+            echo "### Iris deployment"
+            echo "- Image: \`${IMAGE_URI}\`"
+            echo "- Model version: \`${IRIS_MODEL_VERSION}\`"
+            echo "- Service ARN: \`${service_arn}\`"
+            echo "- Endpoint: ${endpoint}"
+          } >> "${GITHUB_STEP_SUMMARY}"
