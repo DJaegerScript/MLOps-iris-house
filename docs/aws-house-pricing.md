@@ -122,6 +122,75 @@ If the model itself is rolled back, use the explicit registry rollback command
 and record the approver and reason. Never overwrite an object and never delete
 the prior version before verification.
 
+## CodePipeline operator walkthrough
+
+The migration uses two separate pipelines. Start a model run with an exact
+dataset object version; do not substitute `latest` or a mutable key reference:
+
+```bash
+aws codepipeline start-pipeline-execution \
+  --name house-pricing-model \
+  --region ap-southeast-3 \
+  --variables \
+    name=DATASET_VERSION,value=v1 \
+    name=DATASET_S3_VERSION_ID,value="$DATASET_S3_VERSION_ID" \
+    name=MODEL_VERSION,value=v2
+```
+
+The model pipeline trains with seed `42`, emits a candidate release artifact,
+and automatically promotes it under the configured default. If the stack is
+deployed with `ModelPromotionMode=manual`, review the candidate metrics,
+bundle checksum, registry version, and model S3 `VersionId` in the SNS/manual
+approval action before approving it. Promotion writes the champion release
+pointer and starts `house-pricing-app` with the exact model coordinates.
+
+For a code-only release, the app pipeline follows `main`, resolves the current
+approved release once, builds the commit-tagged image, and deploys the existing
+ECS Express service. The deployment verifies the task-role policy, waits for a
+new `SUCCESSFUL` deployment, checks `/_stcore/health`, and produces a safe
+deployment summary. The smoke harness reports only immutable coordinates,
+statuses, counts, and latency:
+
+```bash
+python scripts/codepipeline/smoke_test_house_release.py \
+  --public-url https://ir-c1c8733af56f4191b9c1d512f141541f.ecs.ap-southeast-3.on.aws \
+  --approved-release /path/to/approved-release.json \
+  --image-release /path/to/image-release.json \
+  --region ap-southeast-3
+```
+
+The harness checks the public health endpoint, a safe Iris/UI check marker,
+House online prediction, labeled and unlabeled CSV behavior, and invalid CSV
+rejection. It uses an in-memory safe fixture and never reports rows, addresses,
+identifiers, credentials, or prediction values. Use `--skip-model` only for a
+health-only check when the operator does not have read access to the exact
+House model object.
+
+Keep the previous image digest and previous champion release manifest together
+as the rollback record. Roll back by starting a normal app-pipeline execution
+with explicit immutable overrides:
+
+```bash
+python scripts/codepipeline/rollback_house_release.py \
+  --pipeline-name house-pricing-app \
+  --previous-image-uri 163918295215.dkr.ecr.ap-southeast-3.amazonaws.com/iris-mlops:<previous-commit> \
+  --previous-image-digest sha256:<64-lowercase-hex-characters> \
+  --previous-release /path/to/previous-approved-release.json \
+  --reason "restore the last verified House release" \
+  --region ap-southeast-3
+```
+
+Rollback refuses mutable image references, non-champion releases, missing
+reasons, and non-SHA-256 image digests. It invokes the app pipeline with the
+prior image digest and exact House model S3 `VersionId`; it never overwrites or
+deletes an S3 object and never changes the approved-release pointer.
+
+After each release, inspect CodeBuild, ECR, ECS deployment, and CloudWatch
+stages. Confirm Iris remains functional, House online and batch checks pass,
+and CloudWatch contains the `HousePricingMLOps` EMF metrics. Record the image
+digest, model `VersionId`, dataset version, deployment ARN, health latency, and
+rollback reason in the release handoff without copying raw input data.
+
 ## Cost and cleanup
 
 This feature reuses the existing ECS, ECR, S3, and CloudWatch resources. MLflow

@@ -72,6 +72,15 @@ was explicitly approved for registry version `1` and deployed through the
 existing ECS service. The training workflow remains manual and approval-gated;
 application deployment does not retrain the model.
 
+AWS CodePipeline operations for the House model and shared ECS Express
+application are documented in
+[`docs/aws-house-pricing.md`](docs/aws-house-pricing.md). The model pipeline
+consumes an explicit S3 `VersionId`; the app pipeline receives the approved
+model release and deploys an immutable image/model coordinate pair. The
+operator smoke harness reports safe versions, statuses, counts, and latency,
+and the rollback command restores a prior image digest and House model
+`VersionId` without overwriting or deleting artifacts.
+
 ## Model provenance
 
 The v1 artifact is the educational model published at

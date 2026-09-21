@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -69,14 +70,22 @@ def start_app_pipeline(
     *,
     pipeline_name: str,
     release: HouseReleaseManifest,
+    extra_variables: Mapping[str, str] | None = None,
 ) -> str:
     """Start the app pipeline with no mutable model reference."""
 
     if not pipeline_name.strip():
         raise ReleaseValidationError("application pipeline name is required")
+    variables = release_pipeline_variables(release)
+    for name, value in (extra_variables or {}).items():
+        if not isinstance(name, str) or not name.strip():
+            raise ReleaseValidationError("pipeline variable names are required")
+        if not isinstance(value, str):
+            raise ReleaseValidationError(f"pipeline variable {name} must be text")
+        variables.append({"name": name, "value": value})
     response = codepipeline_client.start_pipeline_execution(
         name=pipeline_name,
-        variables=release_pipeline_variables(release),
+        variables=variables,
     )
     try:
         return str(response["pipelineExecutionId"])

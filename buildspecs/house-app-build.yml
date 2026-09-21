@@ -16,29 +16,37 @@ phases:
         : "${AWS_REGION:?AWS_REGION is required}"
         : "${ECR_REPOSITORY:?ECR_REPOSITORY is required}"
         : "${CODEBUILD_RESOLVED_SOURCE_VERSION:?CODEBUILD_RESOLVED_SOURCE_VERSION is required}"
-        account_id="$(aws sts get-caller-identity --query Account --output text)"
-        image_uri="${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${CODEBUILD_RESOLVED_SOURCE_VERSION}"
-        export IMAGE_URI="$image_uri"
         mkdir -p "$CODEBUILD_SRC_DIR/output"
-        aws ecr get-login-password --region "$AWS_REGION" \
-          | docker login --username AWS --password-stdin \
-            "${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        if [[ -n "${IMAGE_URI_OVERRIDE:-}" ]]; then
+          : "${IMAGE_DIGEST_OVERRIDE:?IMAGE_DIGEST_OVERRIDE is required with IMAGE_URI_OVERRIDE}"
+          export IMAGE_URI="$IMAGE_URI_OVERRIDE"
+          export IMAGE_DIGEST="$IMAGE_DIGEST_OVERRIDE"
+        else
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          image_uri="${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${CODEBUILD_RESOLVED_SOURCE_VERSION}"
+          export IMAGE_URI="$image_uri"
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin \
+              "${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        fi
   build:
     commands:
       - python -m pytest -q
       - python -m ruff check .
       - |
         set -euo pipefail
-        docker build --pull --file Dockerfile --tag "$IMAGE_URI" .
-        docker push "$IMAGE_URI"
-        digest="$(aws ecr describe-images \
-          --repository-name "$ECR_REPOSITORY" \
-          --image-ids "imageTag=${CODEBUILD_RESOLVED_SOURCE_VERSION}" \
-          --query 'imageDetails[0].imageDigest' --output text)"
-        test -n "$digest" && test "$digest" != "None"
+        if [[ -z "${IMAGE_URI_OVERRIDE:-}" ]]; then
+          docker build --pull --file Dockerfile --tag "$IMAGE_URI" .
+          docker push "$IMAGE_URI"
+          IMAGE_DIGEST="$(aws ecr describe-images \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids "imageTag=${CODEBUILD_RESOLVED_SOURCE_VERSION}" \
+            --query 'imageDetails[0].imageDigest' --output text)"
+          test -n "$IMAGE_DIGEST" && test "$IMAGE_DIGEST" != "None"
+        fi
         IMAGE_URI="$IMAGE_URI" \
         COMMIT_SHA="$CODEBUILD_RESOLVED_SOURCE_VERSION" \
-        IMAGE_DIGEST="$digest" \
+        IMAGE_DIGEST="$IMAGE_DIGEST" \
           python -c 'import json,os; json.dump({"image_uri":os.environ["IMAGE_URI"],"commit_sha":os.environ["COMMIT_SHA"],"digest":os.environ["IMAGE_DIGEST"]}, open("output/image-release.json", "w"), sort_keys=True, indent=2); open("output/image-release.json", "a").write("\n")'
 
 artifacts:
