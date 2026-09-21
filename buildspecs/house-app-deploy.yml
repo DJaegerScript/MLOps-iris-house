@@ -24,7 +24,15 @@ phases:
         : "${CLOUDWATCH_LOG_GROUP:?CLOUDWATCH_LOG_GROUP is required}"
         image_release="$(find "$CODEBUILD_SRC_DIR" -name image-release.json -print -quit)"
         approved_release="$(find "$CODEBUILD_SRC_DIR" -name approved-release.json -print -quit)"
-        test -n "$image_release" && test -n "$approved_release"
+        test -n "$image_release"
+        if [[ -z "$approved_release" ]]; then
+          : "${APPROVED_RELEASE_PARAMETER_NAME:?APPROVED_RELEASE_PARAMETER_NAME is required for code-only deployments}"
+          aws ssm get-parameter \
+            --name "$APPROVED_RELEASE_PARAMETER_NAME" \
+            --query Parameter.Value --output text \
+            > /tmp/approved-release.json
+          approved_release=/tmp/approved-release.json
+        fi
         IMAGE_RELEASE="$image_release" \
         APPROVED_RELEASE="$approved_release" \
           python - <<'PY'

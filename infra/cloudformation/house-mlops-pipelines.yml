@@ -432,6 +432,11 @@ Resources:
           - Name: HOUSE_REGISTRY_S3_BUCKET
             Value:
               Ref: HouseModelS3BucketName
+          - Name: APP_PIPELINE_NAME
+            Value: house-pricing-app
+          - Name: APPROVED_RELEASE_PARAMETER_NAME
+            Value:
+              Ref: ApprovedReleaseParameterName
 
   HouseAppBuildProject:
     Type: AWS::CodeBuild::Project
@@ -508,6 +513,9 @@ Resources:
           - Name: PUBLIC_HEALTH_URL
             Value:
               Ref: PublicHealthUrl
+          - Name: APPROVED_RELEASE_PARAMETER_NAME
+            Value:
+              Ref: ApprovedReleaseParameterName
 
   HouseModelPipeline:
     Type: AWS::CodePipeline::Pipeline

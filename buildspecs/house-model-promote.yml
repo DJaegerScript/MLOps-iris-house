@@ -16,6 +16,8 @@ phases:
         : "${APPROVED_BY:?APPROVED_BY is required}"
         : "${APPROVAL_REASON:?APPROVAL_REASON is required}"
         : "${HOUSE_REGISTRY_S3_BUCKET:?HOUSE_REGISTRY_S3_BUCKET is required}"
+        : "${APP_PIPELINE_NAME:?APP_PIPELINE_NAME is required}"
+        : "${APPROVED_RELEASE_PARAMETER_NAME:?APPROVED_RELEASE_PARAMETER_NAME is required}"
         candidate_manifest="$(find "$CODEBUILD_SRC_DIR" -name release_manifest.json -print -quit)"
         registry_path="$(find "$CODEBUILD_SRC_DIR" -name registry.json -print -quit)"
         test -n "$candidate_manifest" && test -n "$registry_path"
@@ -45,6 +47,14 @@ phases:
           --body "$CODEBUILD_SRC_DIR/output/approved-release.json" \
           --server-side-encryption AES256 \
           --query VersionId --output text
+        aws ssm put-parameter \
+          --name "$APPROVED_RELEASE_PARAMETER_NAME" \
+          --type String \
+          --value "$(cat "$CODEBUILD_SRC_DIR/output/approved-release.json")" \
+          --overwrite >/dev/null
+        python scripts/codepipeline/invoke_house_app_pipeline.py \
+          --pipeline-name "$APP_PIPELINE_NAME" \
+          --release "$CODEBUILD_SRC_DIR/output/approved-release.json"
         python -c 'import json,sys; release=json.load(open(sys.argv[1])); audit={"action":"promote","registry_version":release["registry_version"],"model_version":release["model_version"],"bundle_sha256":release["bundle_sha256"],"model_s3_version_id":release["model_s3_version_id"],"approved_by":sys.argv[2],"approval_reason":sys.argv[3]}; json.dump(audit, open(sys.argv[4], "w"), indent=2, sort_keys=True); open(sys.argv[4], "a").write("\n")' \
           "$CODEBUILD_SRC_DIR/output/approved-release.json" "$APPROVED_BY" "$APPROVAL_REASON" \
           "$CODEBUILD_SRC_DIR/output/promotion-audit.json"
