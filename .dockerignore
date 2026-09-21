@@ -11,8 +11,11 @@ docs/
 .env
 .env.*
 .aws/
+.kaggle/
+kaggle.json
 data/
 datasets/
+mlruns/
 credentials/
 artifacts/*.pkl
 artifacts/*.joblib

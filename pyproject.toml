@@ -11,6 +11,7 @@ dependencies = [
     "boto3==1.43.98",
     "joblib==1.5.3",
     "numpy==2.3.3",
+    "pandas==2.3.3",
     "scipy==1.17.1",
     "scikit-learn==1.8.0",
     "streamlit==1.50.0",
@@ -33,4 +34,4 @@ line-length = 88
 select = ["E", "F", "I", "UP"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["iris_mlops"]
+known-first-party = ["house_pricing_mlops", "iris_mlops"]

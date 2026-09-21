@@ -11,7 +11,7 @@ def _workflow(name: str) -> str:
     return (WORKFLOW_DIR / name).read_text(encoding="utf-8")
 
 
-def test_pull_request_workflow_runs_checks_and_builds_only_the_application_image(
+def test_pull_request_workflow_runs_fixture_checks_and_builds_application_image(
 ) -> None:
     workflow = _workflow("pull-request.yml")
 
@@ -22,15 +22,27 @@ def test_pull_request_workflow_runs_checks_and_builds_only_the_application_image
         "python -m pip install -r requirements.txt -r requirements-dev.txt"
         in workflow
     )
+    assert "requirements-training.txt" in workflow
     assert "python -m pytest -q" in workflow
     assert "python -m ruff check ." in workflow
     assert "docker build" in workflow
+    assert "docker_smoke_test.py" in workflow
     assert "Dockerfile" in workflow
     assert "id-token: write" not in workflow
     assert "aws-actions/configure-aws-credentials" not in workflow
-    assert "train" not in workflow.lower()
-    assert "dataset" not in workflow.lower()
-    assert "model.pkl" not in workflow.lower()
+    assert "kaggle" not in workflow.lower()
+    assert "aws_access_key_id" not in workflow.lower()
+    assert "train.csv" not in workflow.lower()
+    assert "model.tar.gz" not in workflow.lower()
+
+
+def test_dockerfile_keeps_training_dependencies_and_data_out_of_runtime_image(
+) -> None:
+    dockerfile = (WORKFLOW_DIR.parents[1] / "Dockerfile").read_text()
+
+    assert "requirements-training.txt" not in dockerfile
+    assert "tests/" not in dockerfile
+    assert "datasets/" not in dockerfile
 
 
 def test_deployment_workflow_is_main_only_oidc_and_sha_tagged() -> None:
@@ -67,6 +79,6 @@ def test_deployment_workflow_is_main_only_oidc_and_sha_tagged() -> None:
     assert "DOCKER_IMAGE_VERSION" in workflow
     assert "AWS_ACCESS_KEY_ID" not in workflow
     assert "AWS_SECRET_ACCESS_KEY" not in workflow
-    assert "dataset" not in workflow.lower()
+    assert "HOUSE_DATASET_VERSION" in workflow
     assert "model.pkl" not in workflow.lower()
     assert "train" not in workflow.lower()

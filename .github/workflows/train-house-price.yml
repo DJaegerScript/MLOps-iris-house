@@ -1,0 +1,215 @@
+name: Train House Pricing model
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_version:
+        description: Dataset version already stored in the private versioned bucket
+        required: true
+        default: v1
+      dataset_s3_version_id:
+        description: Exact S3 VersionId for datasets/.../train.csv
+        required: true
+        type: string
+      model_version:
+        description: Immutable House model version to build
+        required: true
+        default: v1
+      promote:
+        description: Request the protected champion promotion job
+        required: true
+        type: boolean
+        default: false
+      promotion_reason:
+        description: Human reason required when requesting promotion
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: house-pricing-training
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-3' }}
+  HOUSE_TRAINING_ROLE_ARN: ${{ vars.HOUSE_TRAINING_ROLE_ARN }}
+  HOUSE_DATASET_S3_BUCKET: ${{ vars.HOUSE_DATASET_S3_BUCKET || vars.IRIS_MODEL_S3_BUCKET }}
+  HOUSE_DATASET_S3_KEY: ${{ vars.HOUSE_DATASET_S3_KEY || 'datasets/house-prices/v1/train.csv' }}
+  HOUSE_DATASET_S3_VERSION_ID: ${{ inputs.dataset_s3_version_id || vars.HOUSE_DATASET_S3_VERSION_ID }}
+  HOUSE_DATASET_VERSION: ${{ inputs.dataset_version || vars.HOUSE_DATASET_VERSION || 'v1' }}
+  HOUSE_MODEL_S3_BUCKET: ${{ vars.HOUSE_MODEL_S3_BUCKET || vars.IRIS_MODEL_S3_BUCKET }}
+  HOUSE_MODEL_S3_KEY: ${{ vars.HOUSE_MODEL_S3_KEY || 'models/house-price/v1/model.tar.gz' }}
+  HOUSE_MODEL_VERSION: ${{ inputs.model_version || vars.HOUSE_MODEL_VERSION || 'v1' }}
+  MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+
+jobs:
+  train:
+    name: Train, track, and register candidate
+    runs-on: ubuntu-latest
+    outputs:
+      registry_version: ${{ steps.register.outputs.registry_version }}
+      model_version_id: ${{ steps.upload-model.outputs.version_id }}
+      mlflow_run_id: ${{ steps.summary.outputs.mlflow_run_id }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install training dependencies
+        run: python -m pip install -r requirements-training.txt
+
+      - name: Configure AWS credentials through GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.HOUSE_TRAINING_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: house-training-${{ github.run_id }}
+
+      - name: Validate immutable training inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${HOUSE_TRAINING_ROLE_ARN:?Set HOUSE_TRAINING_ROLE_ARN}"
+          : "${HOUSE_DATASET_S3_BUCKET:?Set HOUSE_DATASET_S3_BUCKET}"
+          : "${HOUSE_DATASET_S3_KEY:?Set HOUSE_DATASET_S3_KEY}"
+          : "${HOUSE_DATASET_S3_VERSION_ID:?Set HOUSE_DATASET_S3_VERSION_ID}"
+          : "${HOUSE_MODEL_S3_BUCKET:?Set HOUSE_MODEL_S3_BUCKET}"
+          : "${HOUSE_MODEL_S3_KEY:?Set HOUSE_MODEL_S3_KEY}"
+          : "${MLFLOW_TRACKING_URI:?Set MLFLOW_TRACKING_URI}"
+
+      - name: Read exact dataset object version
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws s3api get-object \
+            --bucket "${HOUSE_DATASET_S3_BUCKET}" \
+            --key "${HOUSE_DATASET_S3_KEY}" \
+            --version-id "${HOUSE_DATASET_S3_VERSION_ID}" \
+            /tmp/train.csv >/dev/null
+
+      - name: Train and log deterministic candidate comparison
+        run: |
+          python scripts/train_house_price_model.py \
+            --input /tmp/train.csv \
+            --dataset-version "${HOUSE_DATASET_VERSION}" \
+            --output-dir /tmp/house-training \
+            --tracking-uri "${MLFLOW_TRACKING_URI}" \
+            --git-commit-sha "${GITHUB_SHA}" \
+            --random-seed 42 \
+            --model-version "${HOUSE_MODEL_VERSION}" \
+            --model-s3-bucket "${HOUSE_MODEL_S3_BUCKET}" \
+            --model-s3-key "${HOUSE_MODEL_S3_KEY}" \
+            | tee /tmp/house-training/stdout.json
+
+      - name: Upload immutable model bundle
+        id: upload-model
+        shell: bash
+        run: |
+          set -euo pipefail
+          version_id="$(aws s3api put-object \
+            --bucket "${HOUSE_MODEL_S3_BUCKET}" \
+            --key "${HOUSE_MODEL_S3_KEY}" \
+            --body /tmp/house-training/model.tar.gz \
+            --server-side-encryption AES256 \
+            --query VersionId --output text)"
+          test -n "${version_id}" && test "${version_id}" != "None"
+          echo "version_id=${version_id}" >> "${GITHUB_OUTPUT}"
+
+      - name: Register candidate artifact metadata
+        id: register
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/promote_house_price_model.py \
+            --registry /tmp/house-registry.json \
+            register-candidate \
+            --summary /tmp/house-training/training_summary.json \
+            --s3-version-id "${{ steps.upload-model.outputs.version_id }}" \
+            | tee /tmp/house-registered.json
+          registry_version="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["registry_version"])' /tmp/house-registered.json)"
+          echo "registry_version=${registry_version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload registry audit record
+        run: |
+          aws s3api put-object \
+            --bucket "${HOUSE_MODEL_S3_BUCKET}" \
+            --key "mlflow/registry/house-price-model/${GITHUB_SHA}.json" \
+            --body /tmp/house-registry.json \
+            --server-side-encryption AES256 >/dev/null
+
+      - name: Publish training summary
+        id: summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mlflow_run_id="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["mlflow_run_id"])' /tmp/house-training/training_summary.json)"
+          echo "mlflow_run_id=${mlflow_run_id}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "### House Pricing training"
+            echo "- Dataset version: `${HOUSE_DATASET_VERSION}`"
+            echo "- Dataset S3 VersionId: `${HOUSE_DATASET_S3_VERSION_ID}`"
+            echo "- MLflow run: `${mlflow_run_id}`"
+            echo "- Candidate registry version: `${{ steps.register.outputs.registry_version }}`"
+            echo "- Model S3 VersionId: `${{ steps.upload-model.outputs.version_id }}`"
+            python -c 'import json; s=json.load(open("/tmp/house-training/training_summary.json")); print(f"- Selected model: `{s[\"selected_model\"]}`"); print(f"- Test metrics: `{json.dumps(s[\"metrics\"], sort_keys=True)}`")'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Preserve registry record for approval job
+        uses: actions/upload-artifact@v4
+        with:
+          name: house-pricing-registry-${{ github.run_id }}
+          path: /tmp/house-registry.json
+
+  promote:
+    name: Explicitly promote candidate to champion
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.promote == true }}
+    needs: train
+    runs-on: ubuntu-latest
+    environment: house-pricing-production
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Download candidate registry record
+        uses: actions/download-artifact@v4
+        with:
+          name: house-pricing-registry-${{ github.run_id }}
+          path: /tmp
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install runtime dependencies
+        run: python -m pip install -r requirements.txt
+
+      # promote_champion is implemented by the approval-gated registry adapter.
+      - name: Record approved champion promotion
+        shell: bash
+        env:
+          PROMOTION_REASON: ${{ inputs.promotion_reason }}
+        run: |
+          set -euo pipefail
+          : "${PROMOTION_REASON:?promotion_reason is required}"
+          python scripts/promote_house_price_model.py \
+            --registry /tmp/house-registry.json \
+            promote \
+            --registry-version "${{ needs.train.outputs.registry_version }}" \
+            --approved-by "${GITHUB_ACTOR}" \
+            --reason "${PROMOTION_REASON}"
+          {
+            echo "### House Pricing promotion"
+            echo "- Champion registry version: `${{ needs.train.outputs.registry_version }}`"
+            echo "- Approved by: `${GITHUB_ACTOR}`"
+            echo "- Reason: ${PROMOTION_REASON}"
+            echo "- Model S3 VersionId: `${{ needs.train.outputs.model_version_id }}`"
+          } >> "${GITHUB_STEP_SUMMARY}"

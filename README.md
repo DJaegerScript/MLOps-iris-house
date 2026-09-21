@@ -1,4 +1,4 @@
-# Iris MLOps showcase
+# Iris and House Pricing MLOps showcase
 
 This repository is a minimal MLOps product for serving a vetted, pre-trained
 Iris classifier. It demonstrates the path from an external model artifact to a
@@ -10,8 +10,10 @@ external artifact intake -> checksum/schema validation -> S3 versioning
 -> CloudWatch logs, EMF metrics, and alarms
 ```
 
-House Pricing is intentionally out of scope. The application, CI workflow, and
-deployment workflow never train a model.
+House Pricing is the second product. Unlike Iris, which serves a vetted
+pre-trained artifact, House Pricing includes a reproducible training and
+evaluation path. The real Kaggle dataset and generated production artifacts
+remain outside Git.
 
 ## What this demonstrates
 
@@ -22,16 +24,18 @@ deployment workflow never train a model.
 - Online serving through Streamlit
 - Structured prediction logging and CloudWatch observability
 - Git commit, image, and model version tracking
+- House Pricing dataset intake, schema validation, deterministic preprocessing,
+  candidate model comparison, MLflow tracking, batch prediction, and drift
+  scoring
 
-It intentionally does not demonstrate model training, experiment comparison,
-retraining, automated retraining, or automated model promotion. There are no
-SageMaker Training Jobs, Kubernetes resources, FastAPI service, RDS database,
-API Gateway, or MLflow registry.
+The current repository boundary intentionally keeps production training and
+promotion operator-controlled. It does not commit Kaggle data, credentials,
+MLflow runs, or model bundles.
 
 ## Architecture
 
-- `app.py` renders the four-input Streamlit product and caches one runtime model
-  with `st.cache_resource`.
+- `app.py` renders the four-input Streamlit Iris product and lazily loads House
+  Pricing only when its page is selected.
 - `src/iris_mlops/manifest.py` validates the metadata-only v1 manifest.
 - `src/iris_mlops/model.py` fetches one explicit S3 object version, verifies the
   bundle and each member checksum, then loads the scaler, LDA model, and label
@@ -39,13 +43,32 @@ API Gateway, or MLflow registry.
 - `scripts/package_model_bundle.py` is an offline operator intake step. It
   packages only the four checksum-approved source artifacts and never downloads,
   deserializes, or uploads a model.
-- S3 is private and versioned. The model bundle is not in GitHub or the Docker
-  image. The dataset is not in GitHub, S3, or the image for this showcase.
+- S3 is private and versioned. Iris and House Pricing use separate immutable
+  model and dataset prefixes. Model bundles are not in GitHub or the Docker
+  image, and the real dataset is not committed.
 - ECR stores the application image. ECS Express Mode provides the public HTTPS
   endpoint, Fargate task, load balancer, health check, and canary deployment.
 - ECS sends stdout to `/aws/ecs/iris-mlops`; the application writes structured
   JSON and CloudWatch Embedded Metric Format (EMF).
 - GitHub Actions uses short-lived AWS credentials through GitHub OIDC.
+
+## House Pricing
+
+The complete House Pricing guide is in
+[`docs/house-pricing.md`](docs/house-pricing.md). It covers the official Kaggle
+source, `train.csv` intake, the `house-price-v1` feature schema, local MLflow
+training, batch prediction, drift monitoring, and the AWS handoff boundary.
+
+The committed fixture at `tests/fixtures/house_prices/train.csv` exists only
+to make schema, training, serialization, drift, and Streamlit tests runnable
+without Kaggle or AWS credentials. It is not the real Ames dataset and its
+metrics must not be used as production claims.
+
+The real Kaggle `train.csv` is now versioned privately in S3 as
+`datasets/house-prices/v1/train.csv`; its checksum, S3 VersionId, training run,
+model bundle VersionId, and current candidate/approval status are recorded in
+[`docs/house-pricing.md`](docs/house-pricing.md). ECS production promotion
+remains explicitly approval-gated.
 
 ## Model provenance
 

@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import streamlit as st
 
+from house_pricing_mlops.bundle import LoadedHousePriceModel
+from house_pricing_mlops.config import HouseSettings, load_house_config
+from house_pricing_mlops.logging_utils import HouseStructuredLogger
+from house_pricing_mlops.prediction import (
+    HouseBatchPredictionService,
+    HouseBatchValidationError,
+    HousePredictionInputError,
+    HousePredictionService,
+)
+from house_pricing_mlops.prediction import (
+    load_model_from_s3 as load_house_model_from_s3,
+)
+from house_pricing_mlops.schema import CATEGORICAL_FEATURES, NUMERIC_FEATURES
 from iris_mlops.config import Settings, load_config
 from iris_mlops.logging_utils import StructuredLogger
 from iris_mlops.manifest import ModelManifest, load_manifest
@@ -25,6 +39,8 @@ FEATURES = (
     "petal_length",
     "petal_width",
 )
+IRIS_PRODUCT = "Iris Classifier"
+HOUSE_PRODUCT = "House Price Prediction"
 MANIFEST_PATH = (
     Path(__file__).resolve().parent / "artifacts" / "iris-classifier-v1.manifest.json"
 )
@@ -42,6 +58,15 @@ class AppRuntime:
 
     manifest: ModelManifest
     service: PredictionService
+
+
+@dataclass(frozen=True, slots=True)
+class HouseRuntime:
+    """Cached House model, service, and batch prediction objects."""
+
+    model: LoadedHousePriceModel
+    service: HousePredictionService
+    batch_service: HouseBatchPredictionService
 
 
 @st.cache_resource(show_spinner=False)
@@ -71,6 +96,35 @@ def load_runtime_service(settings: Settings, manifest_path: str) -> AppRuntime:
             manifest,
             logger=logger,
             low_confidence_threshold=settings.low_confidence_threshold,
+        ),
+    )
+
+
+@st.cache_resource(show_spinner=False)
+def load_house_runtime(settings: HouseSettings) -> HouseRuntime:
+    """Load House only after its page is selected and its exact config exists."""
+
+    logger = HouseStructuredLogger(settings)
+    logger.startup()
+    try:
+        model = load_house_model_from_s3(
+            S3ArtifactStore(),
+            settings.model_s3_bucket,
+            settings.model_s3_key,
+            settings.model_s3_version_id,
+        )
+    except Exception as error:
+        logger.model_load_failure(type(error).__name__)
+        raise RuntimeError("House Pricing model could not be loaded") from error
+    logger.model_load_success()
+    return HouseRuntime(
+        model=model,
+        service=HousePredictionService(model, settings, logger=logger),
+        batch_service=HouseBatchPredictionService(
+            model,
+            settings,
+            reference_profile=model.reference_profile,
+            logger=logger,
         ),
     )
 
@@ -107,10 +161,18 @@ def _render_result(result: PredictionResult) -> None:
     )
 
 
-def main() -> None:
-    """Render the Iris classifier page and handle one user prediction."""
+def _selected_product() -> str:
+    sidebar = getattr(st, "sidebar", None)
+    if sidebar is None:
+        return IRIS_PRODUCT
+    return sidebar.radio(
+        "Product",
+        [IRIS_PRODUCT, HOUSE_PRODUCT],
+        index=0,
+    )
 
-    st.set_page_config(page_title="Iris Classifier", page_icon="🌸")
+
+def _render_iris_page() -> None:
     st.title("Iris species classifier")
     st.markdown(
         "This educational app serves a pre-trained scikit-learn classifier. "
@@ -149,6 +211,137 @@ def main() -> None:
             st.error("Prediction failed. Please try again.")
             return
         _render_result(result)
+
+
+def _render_house_page() -> None:
+    st.title("House price prediction")
+    st.markdown(
+        "This educational model learns from selected Ames, Iowa features in the "
+        "Kaggle House Prices dataset. It demonstrates validation, preprocessing, "
+        "training provenance, and versioned production serving."
+    )
+    try:
+        settings = load_house_config()
+        runtime = load_house_runtime(settings)
+    except Exception as error:
+        st.error(f"House Pricing unavailable: {error}")
+        return
+
+    st.caption(
+        f"Model version: {settings.model_version} | "
+        f"Dataset version: {settings.dataset_version} | "
+        f"Schema: house-price-v1"
+    )
+    st.info(
+        "Educational model warning: this model was trained on historical Ames, "
+        "Iowa data and should not be treated as a current appraisal or a model "
+        "for other geographies."
+    )
+    _render_house_metrics(runtime.model.metrics)
+
+    st.subheader("Single-property prediction")
+    features: dict[str, object] = {}
+    for feature in NUMERIC_FEATURES:
+        features[feature] = st.number_input(
+            feature,
+            min_value=0.0,
+            value=None,
+            step=1.0,
+            key=feature,
+        )
+    for feature in CATEGORICAL_FEATURES:
+        options = _house_category_options(runtime.model, feature)
+        features[feature] = st.selectbox(
+            feature,
+            options,
+            index=None,
+            placeholder="Required",
+            key=feature,
+        )
+
+    if st.button("Predict house price"):
+        try:
+            result = runtime.service.predict(features)
+        except HousePredictionInputError as error:
+            st.error(f"Validation error: {error.reason}.")
+        except Exception:
+            st.error("House price prediction failed. Please try again.")
+        else:
+            st.success(f"Predicted sale price: ${result.predicted_sale_price:,.0f}")
+            st.caption(f"Inference latency: {result.latency_ms:.1f} ms")
+
+    uploader = getattr(st, "file_uploader", None)
+    if not callable(uploader):
+        return
+    st.subheader("Batch prediction")
+    uploaded_file = uploader("Upload a CSV of properties", type=["csv"])
+    if uploaded_file is None or not st.button("Run batch prediction"):
+        return
+    try:
+        result = runtime.batch_service.predict_csv(
+            uploaded_file,
+            filename=getattr(uploaded_file, "name", "uploaded.csv"),
+        )
+    except HouseBatchValidationError as error:
+        st.error(f"Batch validation error: {error}")
+        return
+    except Exception:
+        st.error("Batch prediction failed. Please try again.")
+        return
+    st.write(result.predictions.head(10))
+    st.download_button(
+        "Download predictions",
+        data=result.csv_bytes(),
+        file_name="house_predictions.csv",
+        mime="text/csv",
+    )
+    if result.metrics is not None:
+        st.write({name.upper(): value for name, value in result.metrics.items()})
+    st.write("Per-feature drift scores", result.drift_report.per_feature_scores)
+    st.write("Unknown-category values", result.drift_report.unknown_category_count)
+    st.caption(
+        f"Rows processed: {result.rows_processed}; "
+        f"invalid rows: {result.invalid_row_count}; "
+        f"drifted features: {result.drift_report.number_drifted_features}."
+    )
+    if result.drift_report.sample_size_warning:
+        st.warning(
+            "This batch is smaller than the educational drift-monitoring "
+            "sample-size guideline; one-row predictions cannot reliably measure "
+            "input drift."
+        )
+
+
+def _house_category_options(model: LoadedHousePriceModel, feature: str) -> list[str]:
+    try:
+        categories = model.reference_profile["categorical"][feature]["categories"]
+    except (AttributeError, KeyError, TypeError):
+        categories = []
+    return [str(category) for category in categories] or ["Known category"]
+
+
+def _render_house_metrics(metrics: Mapping[str, object]) -> None:
+    test_metrics = metrics.get("test_metrics") if isinstance(metrics, Mapping) else None
+    if not isinstance(test_metrics, Mapping):
+        return
+    st.write(
+        {
+            "Test MAE": test_metrics.get("mae"),
+            "Test RMSE": test_metrics.get("rmse"),
+            "Test R²": test_metrics.get("r2"),
+            "Test RMSLE": test_metrics.get("rmsle"),
+        }
+    )
+
+
+def main() -> None:
+    """Render the selected AI product page."""
+
+    st.set_page_config(page_title="Iris Classifier", page_icon="🌸")
+    if _selected_product() == HOUSE_PRODUCT:
+        _render_house_page()
+        return
+    _render_iris_page()
 
 
 if __name__ == "__main__":  # pragma: no cover - Streamlit invokes this module

@@ -25,7 +25,7 @@ jobs:
           cache: pip
 
       - name: Install pinned project and development dependencies
-        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt -r requirements-training.txt
 
       - name: Run tests
         run: python -m pytest -q
@@ -46,3 +46,6 @@ jobs:
 
       - name: Build application-only image
         run: docker build --pull --file Dockerfile --tag iris-mlops:pr-${{ github.sha }} .
+
+      - name: Run health-only Docker smoke test
+        run: python scripts/docker_smoke_test.py --image iris-mlops:pr-${{ github.sha }} --no-build --host-port 8510

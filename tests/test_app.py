@@ -129,6 +129,10 @@ def test_startup_renders_inputs_prediction_probabilities_and_provenance(
 
     app.main()
 
+    assert (
+        "set_page_config",
+        {"page_title": "Iris Classifier", "page_icon": "🌸"},
+    ) in fake_st.calls
     input_keys = [value for name, value in fake_st.calls if name == "number_input"]
     assert input_keys == list(app.FEATURES)
     assert ("button", "Predict species") in fake_st.calls
