@@ -440,6 +440,7 @@ Resources:
                 Effect: Allow
                 Action:
                   - ecs:CreateExpressGatewayService
+                  - ecs:RegisterTaskDefinition
                   - ecs:DescribeExpressGatewayService
                   - ecs:DescribeServiceDeployments
                   - ecs:ListServiceDeployments

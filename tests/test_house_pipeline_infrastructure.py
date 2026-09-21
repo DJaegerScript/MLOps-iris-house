@@ -95,6 +95,7 @@ def test_house_deploy_role_is_scoped_to_house_service_roles() -> None:
 
     for action in (
         "ecs:CreateExpressGatewayService",
+        "ecs:RegisterTaskDefinition",
         "ecs:DescribeExpressGatewayService",
         "ecs:DescribeServiceDeployments",
         "ecs:ListServiceDeployments",
