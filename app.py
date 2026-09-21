@@ -48,6 +48,57 @@ _DEFAULT_VALUES = {
     "petal_length": 1.4,
     "petal_width": 0.2,
 }
+_HOUSE_FEATURE_LABELS: dict[str, str] = {
+    "OverallQual": "Overall Quality",
+    "GrLivArea": "Above-Ground Living Area (sq ft)",
+    "GarageCars": "Garage Capacity",
+    "TotalBsmtSF": "Total Basement Area",
+    "1stFlrSF": "First-Floor Area",
+    "YearBuilt": "Year Built",
+    "FullBath": "Full Bathrooms",
+    "TotRmsAbvGrd": "Total Rooms Above Grade",
+    "GarageArea": "Garage Area",
+    "Neighborhood": "Neighborhood",
+    "KitchenQual": "Kitchen Quality",
+    "CentralAir": "Central Air Conditioning",
+}
+_HOUSE_CATEGORY_LABELS: dict[str, dict[str, str]] = {
+    "Neighborhood": {
+        "Blmngtn": "Bloomington Heights",
+        "Blueste": "Bluestem",
+        "BrDale": "Briardale",
+        "BrkSide": "Brookside",
+        "ClearCr": "Clear Creek",
+        "CollgCr": "College Creek",
+        "Crawfor": "Crawford",
+        "Edwards": "Edwards",
+        "Gilbert": "Gilbert",
+        "IDOTRR": "Iowa DOT and Rail Road",
+        "MeadowV": "Meadow Village",
+        "Mitchel": "Mitchell",
+        "NAmes": "North Ames",
+        "NoRidge": "Northridge",
+        "NPkVill": "Northpark Villa",
+        "NridgHt": "Northridge Heights",
+        "NWAmes": "Northwest Ames",
+        "OldTown": "Old Town",
+        "Sawyer": "Sawyer",
+        "SawyerW": "Sawyer West",
+        "Somerst": "Somerset",
+        "StoneBr": "Stone Brook",
+        "SWISU": "South & West of Iowa State University",
+        "Timber": "Timberland",
+        "Veenker": "Veenker",
+    },
+    "KitchenQual": {
+        "Ex": "Excellent",
+        "Gd": "Good",
+        "TA": "Typical/Average",
+        "Fa": "Fair",
+        "Po": "Poor",
+    },
+    "CentralAir": {"Y": "Yes", "N": "No"},
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,7 +281,7 @@ def _render_house_page() -> None:
     features: dict[str, object] = {}
     for feature in NUMERIC_FEATURES:
         features[feature] = st.number_input(
-            feature,
+            _HOUSE_FEATURE_LABELS[feature],
             min_value=0.0,
             value=None,
             step=1.0,
@@ -239,11 +290,14 @@ def _render_house_page() -> None:
     for feature in CATEGORICAL_FEATURES:
         options = _house_category_options(runtime.model, feature)
         features[feature] = st.selectbox(
-            feature,
+            _HOUSE_FEATURE_LABELS[feature],
             options,
             index=None,
             placeholder="Required",
             key=feature,
+            format_func=lambda value, feature=feature: _house_category_label(
+                feature, value
+            ),
         )
 
     if st.button("Predict house price"):
@@ -263,6 +317,13 @@ def _house_category_options(model: LoadedHousePriceModel, feature: str) -> list[
     except (AttributeError, KeyError, TypeError):
         categories = []
     return [str(category) for category in categories] or ["Known category"]
+
+
+def _house_category_label(feature: str, value: object) -> str:
+    raw_value = str(value)
+    return _HOUSE_CATEGORY_LABELS.get(feature, {}).get(
+        raw_value, f"Unknown ({raw_value})"
+    )
 
 
 def main() -> None:
