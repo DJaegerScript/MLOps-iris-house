@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -51,7 +52,7 @@ _DEFAULT_VALUES = {
 _HOUSE_FEATURE_LABELS: dict[str, str] = {
     "OverallQual": "Overall Quality",
     "GrLivArea": "Above-Ground Living Area (sq ft)",
-    "GarageCars": "Garage Capacity",
+    "GarageCars": "Garage Capacity (cars)",
     "TotalBsmtSF": "Total Basement Area",
     "1stFlrSF": "First-Floor Area",
     "YearBuilt": "Year Built",
@@ -325,9 +326,14 @@ def _house_category_options(model: LoadedHousePriceModel, feature: str) -> list[
 
 def _house_category_label(feature: str, value: object) -> str:
     raw_value = str(value)
-    return _HOUSE_CATEGORY_LABELS.get(feature, {}).get(
-        raw_value, f"Unknown ({raw_value})"
-    )
+    explicit_labels = _HOUSE_CATEGORY_LABELS.get(feature, {})
+    if raw_value in explicit_labels:
+        return explicit_labels[raw_value]
+
+    readable_value = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", raw_value)
+    readable_value = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", " ", readable_value)
+    readable_value = re.sub(r"[_-]+", " ", readable_value)
+    return " ".join(readable_value.split()).title()
 
 
 def main() -> None:

@@ -185,7 +185,7 @@ def test_house_page_renders_all_declared_inputs_versions_and_prediction(
     assert fake_st.input_labels == {
         "OverallQual": "Overall Quality",
         "GrLivArea": "Above-Ground Living Area (sq ft)",
-        "GarageCars": "Garage Capacity",
+        "GarageCars": "Garage Capacity (cars)",
         "TotalBsmtSF": "Total Basement Area",
         "1stFlrSF": "First-Floor Area",
         "YearBuilt": "Year Built",
@@ -287,3 +287,9 @@ def test_iris_selection_does_not_load_house_configuration(
     app.main()
 
     assert any("Iris model unavailable" in message for message in fake_st.errors)
+
+
+def test_house_category_label_uses_readable_fallback() -> None:
+    assert app._house_category_label("Neighborhood", "NorthWest_Corner") == (
+        "North West Corner"
+    )
