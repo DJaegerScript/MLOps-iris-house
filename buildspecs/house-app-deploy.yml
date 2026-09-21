@@ -14,13 +14,14 @@ phases:
       - |
         set -euo pipefail
         : "${AWS_REGION:?AWS_REGION is required}"
+        : "${APP_VARIANT:?APP_VARIANT is required}"
+        [[ "$APP_VARIANT" == "house" ]] || { echo "APP_VARIANT must be house" >&2; exit 1; }
         : "${ECS_SERVICE_ARN:?ECS_SERVICE_ARN is required}"
+        : "${ECS_SERVICE_NAME:?ECS_SERVICE_NAME is required}"
+        : "${ECS_CLUSTER_ARN:?ECS_CLUSTER_ARN is required}"
         : "${ECS_EXECUTION_ROLE_ARN:?ECS_EXECUTION_ROLE_ARN is required}"
         : "${ECS_TASK_ROLE_ARN:?ECS_TASK_ROLE_ARN is required}"
-        : "${IRIS_MODEL_S3_BUCKET:?IRIS_MODEL_S3_BUCKET is required}"
-        : "${IRIS_MODEL_S3_KEY:?IRIS_MODEL_S3_KEY is required}"
-        : "${IRIS_MODEL_S3_VERSION_ID:?IRIS_MODEL_S3_VERSION_ID is required}"
-        : "${IRIS_MODEL_VERSION:?IRIS_MODEL_VERSION is required}"
+        : "${ECS_INFRASTRUCTURE_ROLE_ARN:?ECS_INFRASTRUCTURE_ROLE_ARN is required}"
         : "${CLOUDWATCH_LOG_GROUP:?CLOUDWATCH_LOG_GROUP is required}"
         image_release="$(find "$CODEBUILD_SRC_DIR" -name image-release.json -print -quit)"
         approved_release="$(find "$CODEBUILD_SRC_DIR" -name approved-release.json -print -quit)"
@@ -107,13 +108,16 @@ phases:
             raise SystemExit("task role lacks exact House model read permission")
         PY
         mkdir -p "$CODEBUILD_SRC_DIR/output"
-        export PREVIOUS_DEPLOYMENT_ARN="$(aws ecs list-service-deployments \
-          --service "$ECS_SERVICE_ARN" \
-          --query 'serviceDeployments[0].serviceDeploymentArn' --output text)"
-        IRIS_MODEL_S3_BUCKET="$IRIS_MODEL_S3_BUCKET" \
-        IRIS_MODEL_S3_KEY="$IRIS_MODEL_S3_KEY" \
-        IRIS_MODEL_S3_VERSION_ID="$IRIS_MODEL_S3_VERSION_ID" \
-        IRIS_MODEL_VERSION="$IRIS_MODEL_VERSION" \
+        export SERVICE_EXISTS=0
+        export PREVIOUS_DEPLOYMENT_ARN=""
+        if aws ecs describe-express-gateway-service \
+          --service-arn "$ECS_SERVICE_ARN" >/dev/null 2>&1; then
+          export SERVICE_EXISTS=1
+          export PREVIOUS_DEPLOYMENT_ARN="$(aws ecs list-service-deployments \
+            --service "$ECS_SERVICE_ARN" \
+            --query 'serviceDeployments[0].serviceDeploymentArn' --output text)"
+        fi
+        APP_VARIANT="$APP_VARIANT" \
         HOUSE_MODEL_S3_BUCKET="$HOUSE_MODEL_S3_BUCKET" \
         HOUSE_MODEL_S3_KEY="$HOUSE_MODEL_S3_KEY" \
         HOUSE_MODEL_S3_VERSION_ID="$HOUSE_MODEL_S3_VERSION_ID" \
@@ -134,13 +138,10 @@ phases:
             "containerPort": 8501,
             "awsLogsConfiguration": {
                 "logGroup": os.environ["CLOUDWATCH_LOG_GROUP"],
-                "logStreamPrefix": "iris-mlops",
+                "logStreamPrefix": "house-pricing",
             },
             "environment": [
-                {"name": "IRIS_MODEL_S3_BUCKET", "value": os.environ["IRIS_MODEL_S3_BUCKET"]},
-                {"name": "IRIS_MODEL_S3_KEY", "value": os.environ["IRIS_MODEL_S3_KEY"]},
-                {"name": "IRIS_MODEL_S3_VERSION_ID", "value": os.environ["IRIS_MODEL_S3_VERSION_ID"]},
-                {"name": "IRIS_MODEL_VERSION", "value": os.environ["IRIS_MODEL_VERSION"]},
+                {"name": "APP_VARIANT", "value": "house"},
                 {"name": "HOUSE_MODEL_S3_BUCKET", "value": os.environ["HOUSE_MODEL_S3_BUCKET"]},
                 {"name": "HOUSE_MODEL_S3_KEY", "value": os.environ["HOUSE_MODEL_S3_KEY"]},
                 {"name": "HOUSE_MODEL_S3_VERSION_ID", "value": os.environ["HOUSE_MODEL_S3_VERSION_ID"]},
@@ -158,23 +159,40 @@ phases:
     commands:
       - |
         set -euo pipefail
-        aws ecs update-express-gateway-service \
-          --service-arn "$ECS_SERVICE_ARN" \
-          --execution-role-arn "$ECS_EXECUTION_ROLE_ARN" \
-          --task-role-arn "$ECS_TASK_ROLE_ARN" \
-          --primary-container file:///tmp/primary-container.json \
-          --health-check-path "/_stcore/health"
+        if [[ "$SERVICE_EXISTS" == "1" ]]; then
+          aws ecs update-express-gateway-service \
+            --service-arn "$ECS_SERVICE_ARN" \
+            --execution-role-arn "$ECS_EXECUTION_ROLE_ARN" \
+            --task-role-arn "$ECS_TASK_ROLE_ARN" \
+            --primary-container file:///tmp/primary-container.json \
+            --health-check-path "/_stcore/health"
+        else
+          created_service_arn="$(aws ecs create-express-gateway-service \
+            --service-name "$ECS_SERVICE_NAME" \
+            --cluster "$ECS_CLUSTER_ARN" \
+            --execution-role-arn "$ECS_EXECUTION_ROLE_ARN" \
+            --infrastructure-role-arn "$ECS_INFRASTRUCTURE_ROLE_ARN" \
+            --task-role-arn "$ECS_TASK_ROLE_ARN" \
+            --primary-container file:///tmp/primary-container.json \
+            --health-check-path "/_stcore/health" \
+            --query 'service.serviceArn' --output text)"
+          [[ "$created_service_arn" == "$ECS_SERVICE_ARN" ]] || {
+            echo "created House service ARN does not match configuration" >&2
+            exit 1
+          }
+        fi
         # The helper returns only after the new deployment is SUCCESSFUL.
-        bash scripts/codepipeline/wait_for_ecs_express_deployment.sh \
+        deployment_arn="$(bash scripts/codepipeline/wait_for_ecs_express_deployment.sh \
           "$ECS_SERVICE_ARN" "$PREVIOUS_DEPLOYMENT_ARN"
+        )"
         endpoint="$(aws ecs describe-express-gateway-service \
           --service-arn "$ECS_SERVICE_ARN" \
           --query 'service.activeConfigurations[0].ingressPaths[0].endpoint' \
           --output text)"
         smoke_url="${PUBLIC_HEALTH_URL:-${endpoint}/_stcore/health}"
         curl --fail --silent --show-error "$smoke_url" >/dev/null
-        python -c 'import json,sys; json.dump({"image_uri":sys.argv[1],"image_digest":sys.argv[2],"commit_sha":sys.argv[3],"house_model_version":sys.argv[4],"house_model_s3_version_id":sys.argv[5],"health_url":sys.argv[6],"status":"HEALTHY"}, open("output/deployment-summary.json", "w"), indent=2, sort_keys=True); open("output/deployment-summary.json", "a").write("\n")' \
-          "$IMAGE_URI" "$IMAGE_DIGEST" "$GIT_COMMIT_SHA" "$HOUSE_MODEL_VERSION" "$HOUSE_MODEL_S3_VERSION_ID" "$smoke_url"
+        python -c 'import json,sys; json.dump({"service_arn":sys.argv[1],"service_deployment_arn":sys.argv[2],"app_variant":"house","image_uri":sys.argv[3],"image_digest":sys.argv[4],"commit_sha":sys.argv[5],"house_model_version":sys.argv[6],"house_model_s3_version_id":sys.argv[7],"health_url":sys.argv[8],"status":"HEALTHY"}, open("output/deployment-summary.json", "w"), indent=2, sort_keys=True); open("output/deployment-summary.json", "a").write("\n")' \
+          "$ECS_SERVICE_ARN" "$deployment_arn" "$IMAGE_URI" "$IMAGE_DIGEST" "$GIT_COMMIT_SHA" "$HOUSE_MODEL_VERSION" "$HOUSE_MODEL_S3_VERSION_ID" "$smoke_url"
 
 artifacts:
   files:
