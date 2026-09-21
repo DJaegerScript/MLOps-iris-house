@@ -51,3 +51,33 @@ def test_tracker_exposes_configured_remote_uri_without_logging_credentials() -> 
 
     assert tracker.tracking_uri == "https://mlflow.example.invalid/tracking"
     assert "password" not in repr(tracker).lower()
+
+
+def test_tracker_registers_selected_model_when_requested(tmp_path: Path) -> None:
+    tracking_uri = (tmp_path / "mlruns").as_uri()
+    result = train_house_price_model(
+        pd.read_csv(FIXTURE_PATH), config=TrainingConfig(random_seed=7)
+    )
+    provenance = build_dataset_provenance(
+        FIXTURE_PATH,
+        dataset_version="fixture-v1",
+        download_timestamp="2026-09-21T00:00:00+00:00",
+        git_commit_sha="abc123",
+        training_configuration=result.config.to_dict(),
+    )
+
+    tracked = MLflowTracker(
+        tracking_uri,
+        experiment_name="house-prices-registry-test",
+    ).log(
+        result,
+        provenance,
+        training_duration_seconds=1.25,
+        registered_model_name="house-price-model-test",
+    )
+
+    client = mlflow.MlflowClient(tracking_uri=tracking_uri)
+    versions = client.search_model_versions("name = 'house-price-model-test'")
+    assert len(versions) == 1
+    assert versions[0].run_id == tracked.run_id
+    assert versions[0].name == "house-price-model-test"

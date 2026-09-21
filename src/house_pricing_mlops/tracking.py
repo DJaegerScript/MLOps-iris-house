@@ -20,6 +20,7 @@ class TrackingResult:
     run_id: str
     experiment_id: str
     tracking_uri: str
+    registered_model_version: str | None = None
 
 
 class MLflowTracker:
@@ -49,6 +50,7 @@ class MLflowTracker:
         *,
         training_duration_seconds: float,
         bundle_path: str | Path | None = None,
+        registered_model_name: str | None = None,
     ) -> TrackingResult:
         """Log required parameters, tags, metrics, and an optional bundle."""
 
@@ -102,12 +104,27 @@ class MLflowTracker:
                             f"{candidate.name}_validation_{metric_name}"
                         ] = float(value)
             mlflow.log_metrics(metrics)
+            registered_model_version: str | None = None
             if bundle_path is not None:
                 mlflow.log_artifact(str(bundle_path), artifact_path="model-bundle")
+            if registered_model_name is not None:
+                model_info = mlflow.sklearn.log_model(
+                    result.selected_pipeline,
+                    artifact_path="selected-model",
+                    registered_model_name=registered_model_name,
+                )
+                registered_model_version = getattr(
+                    model_info, "registered_model_version", None
+                )
             return TrackingResult(
                 run_id=run.info.run_id,
                 experiment_id=experiment.experiment_id,
                 tracking_uri=self.tracking_uri,
+                registered_model_version=(
+                    str(registered_model_version)
+                    if registered_model_version is not None
+                    else None
+                ),
             )
 
 

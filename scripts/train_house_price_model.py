@@ -76,6 +76,7 @@ def run_training(
         provenance,
         training_duration_seconds=duration,
         bundle_path=bundle.path,
+        registered_model_name=model_name,
     )
     summary: dict[str, object] = {
         "dataset_version": provenance.dataset_version,
@@ -90,6 +91,7 @@ def run_training(
         "training_duration_seconds": duration,
         "mlflow_run_id": tracked.run_id,
         "mlflow_experiment_id": tracked.experiment_id,
+        "mlflow_registered_model_version": tracked.registered_model_version,
         "tracking_uri": tracked.tracking_uri,
         "random_seed": config.random_seed,
         "model_name": model_name,
