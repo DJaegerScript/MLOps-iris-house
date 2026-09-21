@@ -7,7 +7,7 @@ on:
 
 # The IAM role trust policy must require both:
 #   aud = sts.amazonaws.com
-#   sub = repo:DJaegerScript/MLOps-iris-house:ref:refs/heads/main
+#   sub = repo:DJaegerScript@85334514/MLOps-iris-house@1378975661:ref:refs/heads/main
 # This workflow intentionally uses short-lived GitHub OIDC credentials only;
 # do not replace AWS_DEPLOY_ROLE_ARN with an access key or static secret.
 permissions:

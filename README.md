@@ -241,7 +241,7 @@ The IAM trust policy accepts only the GitHub OIDC audience
 `sts.amazonaws.com` and this subject:
 
 ```text
-repo:DJaegerScript/MLOps-iris-house:ref:refs/heads/main
+repo:DJaegerScript@85334514/MLOps-iris-house@1378975661:ref:refs/heads/main
 ```
 
 Pull requests run dependency installation, tests, linting, and a Docker build.
