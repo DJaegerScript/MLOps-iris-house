@@ -19,6 +19,7 @@ phases:
     commands:
       - |
         set -euo pipefail
+        [[ "${HOUSE_DATASET_S3_VERSION_ID:-}" == "unset" ]] && unset HOUSE_DATASET_S3_VERSION_ID
         : "${HOUSE_DATASET_S3_BUCKET:?HOUSE_DATASET_S3_BUCKET is required}"
         : "${HOUSE_DATASET_S3_KEY:?HOUSE_DATASET_S3_KEY is required}"
         : "${HOUSE_DATASET_S3_VERSION_ID:?HOUSE_DATASET_S3_VERSION_ID is required}"

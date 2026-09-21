@@ -564,7 +564,7 @@ Resources:
         - Name: DATASET_VERSION
           DefaultValue: v1
         - Name: DATASET_S3_VERSION_ID
-          DefaultValue: ''
+          DefaultValue: unset
         - Name: MODEL_VERSION
           DefaultValue: v1
         - Name: PROMOTION_APPROVED_BY
@@ -672,17 +672,17 @@ Resources:
           DefaultValue:
             Ref: HouseModelS3Key
         - Name: HOUSE_MODEL_S3_VERSION_ID
-          DefaultValue: ''
+          DefaultValue: unset
         - Name: HOUSE_MODEL_VERSION
           DefaultValue: v1
         - Name: HOUSE_DATASET_VERSION
           DefaultValue: v1
         - Name: IMAGE_URI_OVERRIDE
-          DefaultValue: ''
+          DefaultValue: unset
         - Name: IMAGE_DIGEST_OVERRIDE
-          DefaultValue: ''
+          DefaultValue: unset
         - Name: ROLLBACK_REASON
-          DefaultValue: ''
+          DefaultValue: unset
       Stages:
         - Name: Source
           Actions:
