@@ -25,8 +25,19 @@ class FakeHouseStreamlit:
         self.sidebar = FakeSidebar(selected)
         self.calls: list[tuple[str, object]] = []
         self.errors: list[str] = []
+        self.input_labels: dict[str, str] = {}
+        self.selectbox_options: dict[str, list[str]] = {}
+        self.selectbox_formatters: dict[str, object] = {}
+        self.formatted_options: dict[str, list[str]] = {}
         self.values = {feature: 1.0 for feature in NUMERIC_FEATURES}
         self.values.update({feature: "known" for feature in CATEGORICAL_FEATURES})
+        self.values.update(
+            {
+                "Neighborhood": "CollgCr",
+                "KitchenQual": "TA",
+                "CentralAir": "Y",
+            }
+        )
 
     def set_page_config(self, **kwargs: object) -> None:
         self.calls.append(("set_page_config", kwargs))
@@ -45,11 +56,21 @@ class FakeHouseStreamlit:
 
     def number_input(self, label: str, **kwargs: object) -> float:
         key = str(kwargs["key"])
+        self.input_labels[key] = label
         self.calls.append(("number_input", key))
         return float(self.values[key])
 
     def selectbox(self, label: str, options: object, **kwargs: object) -> str:
         key = str(kwargs["key"])
+        option_values = [str(option) for option in options]
+        format_func = kwargs.get("format_func")
+        self.input_labels[key] = label
+        self.selectbox_options[key] = option_values
+        self.selectbox_formatters[key] = format_func
+        self.formatted_options[key] = [
+            str(format_func(option)) if callable(format_func) else option
+            for option in option_values
+        ]
         self.calls.append(("selectbox", key))
         return str(self.values[key])
 
@@ -137,7 +158,13 @@ def test_house_page_renders_all_declared_inputs_versions_and_prediction(
                 "rmsle": 0.1352,
             }
         },
-        reference_profile={"categorical": {}},
+        reference_profile={
+            "categorical": {
+                "Neighborhood": {"categories": ["CollgCr"]},
+                "KitchenQual": {"categories": ["TA"]},
+                "CentralAir": {"categories": ["Y"]},
+            }
+        },
     )
     monkeypatch.setattr(app, "st", fake_st)
     monkeypatch.setattr(app, "load_house_config", lambda: settings)
@@ -155,6 +182,30 @@ def test_house_page_renders_all_declared_inputs_versions_and_prediction(
         if name in {"number_input", "selectbox"}
     ]
     assert input_keys == [*NUMERIC_FEATURES, *CATEGORICAL_FEATURES]
+    assert fake_st.input_labels == {
+        "OverallQual": "Overall Quality",
+        "GrLivArea": "Above-Ground Living Area (sq ft)",
+        "GarageCars": "Garage Capacity (cars)",
+        "TotalBsmtSF": "Total Basement Area (sq ft)",
+        "1stFlrSF": "First-Floor Area (sq ft)",
+        "YearBuilt": "Year Built",
+        "FullBath": "Full Bathrooms",
+        "TotRmsAbvGrd": "Total Rooms Above Grade",
+        "GarageArea": "Garage Area (sq ft)",
+        "Neighborhood": "Neighborhood",
+        "KitchenQual": "Kitchen Quality",
+        "CentralAir": "Central Air Conditioning",
+    }
+    assert fake_st.selectbox_options == {
+        "Neighborhood": ["CollgCr"],
+        "KitchenQual": ["TA"],
+        "CentralAir": ["Y"],
+    }
+    assert fake_st.formatted_options == {
+        "Neighborhood": ["College Creek"],
+        "KitchenQual": ["Typical/Average"],
+        "CentralAir": ["Yes"],
+    }
     assert not any(
         name == "subheader" and value == "Batch prediction"
         for name, value in fake_st.calls
@@ -190,6 +241,9 @@ def test_house_page_renders_all_declared_inputs_versions_and_prediction(
     )
     assert service.inputs is not None
     assert set(service.inputs[0]) == set(NUMERIC_FEATURES + CATEGORICAL_FEATURES)
+    assert service.inputs[0]["Neighborhood"] == "CollgCr"
+    assert service.inputs[0]["KitchenQual"] == "TA"
+    assert service.inputs[0]["CentralAir"] == "Y"
 
 
 def test_house_load_failure_is_rendered_as_house_specific_error(
@@ -233,3 +287,9 @@ def test_iris_selection_does_not_load_house_configuration(
     app.main()
 
     assert any("Iris model unavailable" in message for message in fake_st.errors)
+
+
+def test_house_category_label_uses_readable_fallback() -> None:
+    assert app._house_category_label("Neighborhood", "NorthWest_Corner") == (
+        "North West Corner"
+    )
