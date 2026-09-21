@@ -135,9 +135,7 @@ jobs:
               --execution-role-arn "${ECS_EXECUTION_ROLE_ARN}" \
               --task-role-arn "${ECS_TASK_ROLE_ARN}" \
               --primary-container file:///tmp/iris-primary-container.json \
-              --health-check-path "/_stcore/health" \
-              --monitor-resources DEPLOYMENT \
-              --monitor-mode TEXT-ONLY
+              --health-check-path "/_stcore/health"
             service_arn="${ECS_SERVICE_ARN}"
           else
             aws ecs create-express-gateway-service \
@@ -147,8 +145,6 @@ jobs:
               --task-role-arn "${ECS_TASK_ROLE_ARN}" \
               --primary-container file:///tmp/iris-primary-container.json \
               --health-check-path "/_stcore/health" \
-              --monitor-resources DEPLOYMENT \
-              --monitor-mode TEXT-ONLY \
               --output json > /tmp/iris-express-service.json
             service_arn="$(jq -r '.service.serviceArn' /tmp/iris-express-service.json)"
           fi
