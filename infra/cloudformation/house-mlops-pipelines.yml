@@ -648,6 +648,7 @@ Resources:
                   Fn::Sub: >-
                     [{"name":"APPROVED_BY","value":"#{variables.PROMOTION_APPROVED_BY}","type":"PLAINTEXT"},{"name":"APPROVAL_REASON","value":"#{variables.PROMOTION_REASON}","type":"PLAINTEXT"}]
               InputArtifacts:
+                - Name: SourceOutput
                 - Name: CandidateOutput
               OutputArtifacts:
                 - Name: ApprovedReleaseOutput
