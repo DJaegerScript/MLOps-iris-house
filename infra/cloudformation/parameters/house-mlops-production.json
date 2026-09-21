@@ -1,0 +1,86 @@
+[
+  {
+    "ParameterKey": "GitHubConnectionArn",
+    "ParameterValue": "arn:aws:codestar-connections:ap-southeast-3:163918295215:connection/REPLACE_WITH_CONNECTION_ID"
+  },
+  {
+    "ParameterKey": "GitHubFullRepositoryId",
+    "ParameterValue": "DJaegerScript/MLOps-iris-house"
+  },
+  {
+    "ParameterKey": "GitHubBranch",
+    "ParameterValue": "main"
+  },
+  {
+    "ParameterKey": "EcsServiceArn",
+    "ParameterValue": "arn:aws:ecs:ap-southeast-3:163918295215:service/iris-mlops/iris-mlops"
+  },
+  {
+    "ParameterKey": "EcsExecutionRoleArn",
+    "ParameterValue": "arn:aws:iam::163918295215:role/iris-mlops-ecs-execution-role"
+  },
+  {
+    "ParameterKey": "EcsTaskRoleArn",
+    "ParameterValue": "arn:aws:iam::163918295215:role/iris-mlops-ecs-task-role"
+  },
+  {
+    "ParameterKey": "EcrRepositoryArn",
+    "ParameterValue": "arn:aws:ecr:ap-southeast-3:163918295215:repository/iris-mlops"
+  },
+  {
+    "ParameterKey": "EcrRepositoryName",
+    "ParameterValue": "iris-mlops"
+  },
+  {
+    "ParameterKey": "HouseDatasetS3BucketName",
+    "ParameterValue": "iris-mlops-models-163918295215-apse3"
+  },
+  {
+    "ParameterKey": "HouseDatasetS3Key",
+    "ParameterValue": "datasets/house-prices/v1/train.csv"
+  },
+  {
+    "ParameterKey": "HouseModelS3BucketName",
+    "ParameterValue": "iris-mlops-models-163918295215-apse3"
+  },
+  {
+    "ParameterKey": "HouseModelS3Key",
+    "ParameterValue": "models/house-price/v1/model.tar.gz"
+  },
+  {
+    "ParameterKey": "IrisModelS3BucketName",
+    "ParameterValue": "iris-mlops-models-163918295215-apse3"
+  },
+  {
+    "ParameterKey": "IrisModelS3Key",
+    "ParameterValue": "models/iris-classifier/v1/model.tar.gz"
+  },
+  {
+    "ParameterKey": "IrisModelS3VersionId",
+    "ParameterValue": "OxDlS6cZLaVambx_QDpvdogy2RrRR4o3"
+  },
+  {
+    "ParameterKey": "IrisModelVersion",
+    "ParameterValue": "v1"
+  },
+  {
+    "ParameterKey": "CloudWatchLogGroupName",
+    "ParameterValue": "/aws/ecs/iris-mlops"
+  },
+  {
+    "ParameterKey": "ApprovedReleaseParameterName",
+    "ParameterValue": "/iris-mlops/house-pricing/approved-release"
+  },
+  {
+    "ParameterKey": "MlflowTrackingSecretArn",
+    "ParameterValue": "arn:aws:secretsmanager:ap-southeast-3:163918295215:secret:REPLACE_WITH_MLFLOW_SECRET"
+  },
+  {
+    "ParameterKey": "ModelPromotionMode",
+    "ParameterValue": "automatic"
+  },
+  {
+    "ParameterKey": "PublicHealthUrl",
+    "ParameterValue": "https://ir-c1c8733af56f4191b9c1d512f141541f.ecs.ap-southeast-3.on.aws/_stcore/health"
+  }
+]

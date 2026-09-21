@@ -23,6 +23,34 @@ models/house-price/v1/model.tar.gz
 mlflow/registry/house-price-model/<immutable-record>.json
 ```
 
+## CodePipeline migration boundary
+
+The CloudFormation template
+`infra/cloudformation/house-mlops-pipelines.yml` provisions two CodePipeline V2
+pipelines and four scoped CodeBuild projects:
+
+- `house-pricing-model` is started with an exact dataset `VersionId`, trains
+  with seed `42`, uploads an immutable bundle, registers a candidate, and
+  automatically promotes it using the pipeline execution identity and reason.
+  `ModelPromotionMode=manual` enables the optional SNS-backed manual approval
+  action when a human gate is required.
+- `house-pricing-app` follows the GitHub `main` branch, builds the commit SHA
+  image, and deploys the existing ECS Express Mode service through the custom
+  CodeBuild deployment action.
+
+The stack creates only pipeline, artifact-bucket, notification-topic,
+CodeBuild, and pipeline-role resources. The existing ECS service, execution
+role, and task role are passed as parameters and remain externally managed.
+The task role must retain the exact `house-pricing-model-read` statement for
+the configured House model object; this stack does not broaden it or grant a
+wildcard model prefix.
+
+The GitHub CodeConnections ARN and MLflow Secrets Manager ARN are deployment
+inputs. Values are not committed to the repository. The CodeBuild training
+role reads the configured tracking secret, while model and application roles
+receive only their pipeline-specific S3, ECR, SSM, ECS, and `iam:PassRole`
+permissions.
+
 The deployed application receives the exact House model S3 key and `VersionId`
 through non-secret GitHub environment variables. The application does not
 load a mutable `latest` object. The verified current coordinates are:

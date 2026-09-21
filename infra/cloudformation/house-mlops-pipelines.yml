@@ -1,0 +1,734 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  CodePipeline V2 and scoped CodeBuild roles for the House model and shared
+  Iris/House ECS Express application deployment.
+
+Parameters:
+  GitHubConnectionArn:
+    Type: String
+    Description: Existing AWS CodeConnections GitHub connection ARN.
+  GitHubFullRepositoryId:
+    Type: String
+    Default: DJaegerScript/MLOps-iris-house
+  GitHubBranch:
+    Type: String
+    Default: main
+  EcsServiceArn:
+    Type: String
+    Default: arn:aws:ecs:ap-southeast-3:163918295215:service/iris-mlops/iris-mlops
+  EcsExecutionRoleArn:
+    Type: String
+    Default: arn:aws:iam::163918295215:role/iris-mlops-ecs-execution-role
+  EcsTaskRoleArn:
+    Type: String
+    Default: arn:aws:iam::163918295215:role/iris-mlops-ecs-task-role
+  EcrRepositoryArn:
+    Type: String
+    Default: arn:aws:ecr:ap-southeast-3:163918295215:repository/iris-mlops
+  EcrRepositoryName:
+    Type: String
+    Default: iris-mlops
+  HouseDatasetS3BucketName:
+    Type: String
+    Default: iris-mlops-models-163918295215-apse3
+  HouseDatasetS3Key:
+    Type: String
+    Default: datasets/house-prices/v1/train.csv
+  HouseModelS3BucketName:
+    Type: String
+    Default: iris-mlops-models-163918295215-apse3
+  HouseModelS3Key:
+    Type: String
+    Default: models/house-price/v1/model.tar.gz
+  IrisModelS3BucketName:
+    Type: String
+    Default: iris-mlops-models-163918295215-apse3
+  IrisModelS3Key:
+    Type: String
+    Default: models/iris-classifier/v1/model.tar.gz
+  IrisModelS3VersionId:
+    Type: String
+    Default: OxDlS6cZLaVambx_QDpvdogy2RrRR4o3
+  IrisModelVersion:
+    Type: String
+    Default: v1
+  CloudWatchLogGroupName:
+    Type: String
+    Default: /aws/ecs/iris-mlops
+  ApprovedReleaseParameterName:
+    Type: String
+    Default: /iris-mlops/house-pricing/approved-release
+  MlflowTrackingSecretArn:
+    Type: String
+    Description: Secrets Manager secret containing the configured MLflow tracking URI.
+  ModelPromotionMode:
+    Type: String
+    Default: automatic
+    AllowedValues:
+      - automatic
+      - manual
+  PublicHealthUrl:
+    Type: String
+    Default: https://ir-c1c8733af56f4191b9c1d512f141541f.ecs.ap-southeast-3.on.aws/_stcore/health
+
+Conditions:
+  ManualPromotionApproval:
+    Fn::Equals:
+      - Ref: ModelPromotionMode
+      - manual
+
+Resources:
+  PipelineArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpirePipelineArtifacts
+            Status: Enabled
+            ExpirationInDays: 30
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+
+  HousePromotionNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName:
+        Fn::Sub: ${AWS::StackName}-house-promotion
+
+  HouseCodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-codepipeline
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: codepipeline-orchestration
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ArtifactBucketAccess
+                Effect: Allow
+                Action:
+                  - s3:GetBucketVersioning
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                Resource:
+                  - Fn::GetAtt: [PipelineArtifactBucket, Arn]
+                  - Fn::Sub: ${PipelineArtifactBucket.Arn}/*
+              - Sid: StartAndInspectBuilds
+                Effect: Allow
+                Action:
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StopBuild
+                Resource:
+                  - Fn::GetAtt: [HouseModelTrainProject, Arn]
+                  - Fn::GetAtt: [HouseModelPromotionProject, Arn]
+                  - Fn::GetAtt: [HouseAppBuildProject, Arn]
+                  - Fn::GetAtt: [HouseAppDeployProject, Arn]
+              - Sid: PassOnlyCodeBuildRoles
+                Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - Fn::GetAtt: [HouseModelBuildRole, Arn]
+                  - Fn::GetAtt: [HouseModelPromotionRole, Arn]
+                  - Fn::GetAtt: [HouseAppBuildRole, Arn]
+                  - Fn::GetAtt: [HouseAppDeployRole, Arn]
+              - Sid: UseConfiguredGitHubConnection
+                Effect: Allow
+                Action: codeconnections:UseConnection
+                Resource:
+                  Ref: GitHubConnectionArn
+              - Sid: PublishPromotionNotifications
+                Effect: Allow
+                Action: sns:Publish
+                Resource:
+                  Ref: HousePromotionNotificationTopic
+
+  HouseModelBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-model-build
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: house-model-training-boundary
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadExactDataset
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:s3:::${HouseDatasetS3BucketName}/${HouseDatasetS3Key}
+              - Sid: WriteExactModelBundle
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:s3:::${HouseModelS3BucketName}/${HouseModelS3Key}
+              - Sid: WriteRegistryRecords
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:s3:::${HouseModelS3BucketName}/mlflow/registry/house-price-model/*
+              - Sid: ReadPipelineArtifacts
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource:
+                  Fn::Sub: ${PipelineArtifactBucket.Arn}/*
+              - Sid: ReadTrackingConfiguration
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  Ref: MlflowTrackingSecretArn
+              - Sid: WriteBuildLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  HouseModelPromotionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-model-promotion
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: house-model-promotion-boundary
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadAndWritePipelineArtifacts
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                Resource:
+                  Fn::Sub: ${PipelineArtifactBucket.Arn}/*
+              - Sid: ReadAndWriteImmutableRegistry
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:s3:::${HouseModelS3BucketName}/mlflow/registry/house-price-model/*
+              - Sid: UpdateApprovedReleaseCoordinate
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:PutParameter
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApprovedReleaseParameterName}
+              - Sid: StartOnlyApplicationPipeline
+                Effect: Allow
+                Action: codepipeline:StartPipelineExecution
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:codepipeline:${AWS::Region}:${AWS::AccountId}:house-pricing-app
+              - Sid: WriteBuildLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  HouseAppBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-app-build
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: house-app-build-boundary
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadAndWritePipelineArtifacts
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                Resource:
+                  Fn::Sub: ${PipelineArtifactBucket.Arn}/*
+              - Sid: EcrAuthentication
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Sid: PushOnlyConfiguredImageRepository
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:CompleteLayerUpload
+                  - ecr:DescribeImages
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                Resource:
+                  Ref: EcrRepositoryArn
+              - Sid: WriteBuildLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  HouseAppDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-app-deploy
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: house-app-deploy-boundary
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadPipelineAndReleaseArtifacts
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource:
+                  - Fn::Sub: ${PipelineArtifactBucket.Arn}/*
+                  - Fn::Sub: arn:${AWS::Partition}:s3:::${HouseModelS3BucketName}/mlflow/registry/house-price-model/*
+              - Sid: ReadApprovedReleaseCoordinate
+                Effect: Allow
+                Action: ssm:GetParameter
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApprovedReleaseParameterName}
+              - Sid: UpdateConfiguredExpressService
+                Effect: Allow
+                Action:
+                  - ecs:DescribeExpressGatewayService
+                  - ecs:DescribeServiceDeployments
+                  - ecs:ListServiceDeployments
+                  - ecs:UpdateExpressGatewayService
+                Resource: '*'
+              - Sid: InspectConfiguredTaskPolicy
+                Effect: Allow
+                Action: iam:GetRolePolicy
+                Resource:
+                  Ref: EcsTaskRoleArn
+              - Sid: PassOnlyExistingEcsRoles
+                Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - Ref: EcsExecutionRoleArn
+                  - Ref: EcsTaskRoleArn
+              - Sid: WriteBuildLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  HouseModelTrainProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-model-train
+      ServiceRole:
+        Fn::GetAtt: [HouseModelBuildRole, Arn]
+      TimeoutInMinutes: 60
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: buildspecs/house-model-train.yml
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: false
+        EnvironmentVariables:
+          - Name: AWS_REGION
+            Value:
+              Ref: AWS::Region
+          - Name: HOUSE_DATASET_S3_BUCKET
+            Value:
+              Ref: HouseDatasetS3BucketName
+          - Name: HOUSE_DATASET_S3_KEY
+            Value:
+              Ref: HouseDatasetS3Key
+          - Name: HOUSE_MODEL_S3_BUCKET
+            Value:
+              Ref: HouseModelS3BucketName
+          - Name: HOUSE_MODEL_S3_KEY
+            Value:
+              Ref: HouseModelS3Key
+
+  HouseModelPromotionProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-model-promotion
+      ServiceRole:
+        Fn::GetAtt: [HouseModelPromotionRole, Arn]
+      TimeoutInMinutes: 20
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: buildspecs/house-model-promote.yml
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: false
+        EnvironmentVariables:
+          - Name: AWS_REGION
+            Value:
+              Ref: AWS::Region
+          - Name: HOUSE_REGISTRY_S3_BUCKET
+            Value:
+              Ref: HouseModelS3BucketName
+
+  HouseAppBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-app-build
+      ServiceRole:
+        Fn::GetAtt: [HouseAppBuildRole, Arn]
+      TimeoutInMinutes: 45
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: buildspecs/house-app-build.yml
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: AWS_REGION
+            Value:
+              Ref: AWS::Region
+          - Name: ECR_REPOSITORY
+            Value:
+              Ref: EcrRepositoryName
+
+  HouseAppDeployProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-app-deploy
+      ServiceRole:
+        Fn::GetAtt: [HouseAppDeployRole, Arn]
+      TimeoutInMinutes: 30
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: buildspecs/house-app-deploy.yml
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: false
+        EnvironmentVariables:
+          - Name: AWS_REGION
+            Value:
+              Ref: AWS::Region
+          - Name: ECS_SERVICE_ARN
+            Value:
+              Ref: EcsServiceArn
+          - Name: ECS_EXECUTION_ROLE_ARN
+            Value:
+              Ref: EcsExecutionRoleArn
+          - Name: ECS_TASK_ROLE_ARN
+            Value:
+              Ref: EcsTaskRoleArn
+          - Name: IRIS_MODEL_S3_BUCKET
+            Value:
+              Ref: IrisModelS3BucketName
+          - Name: IRIS_MODEL_S3_KEY
+            Value:
+              Ref: IrisModelS3Key
+          - Name: IRIS_MODEL_S3_VERSION_ID
+            Value:
+              Ref: IrisModelS3VersionId
+          - Name: IRIS_MODEL_VERSION
+            Value:
+              Ref: IrisModelVersion
+          - Name: CLOUDWATCH_LOG_GROUP
+            Value:
+              Ref: CloudWatchLogGroupName
+          - Name: PUBLIC_HEALTH_URL
+            Value:
+              Ref: PublicHealthUrl
+
+  HouseModelPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: house-pricing-model
+      PipelineType: V2
+      ExecutionMode: QUEUED
+      RestartExecutionOnUpdate: false
+      RoleArn:
+        Fn::GetAtt: [HouseCodePipelineRole, Arn]
+      ArtifactStore:
+        Type: S3
+        Location:
+          Ref: PipelineArtifactBucket
+        EncryptionKey:
+          Id: alias/aws/s3
+          Type: KMS
+      Variables:
+        - Name: DATASET_VERSION
+          DefaultValue: v1
+        - Name: DATASET_S3_VERSION_ID
+          DefaultValue: ''
+        - Name: MODEL_VERSION
+          DefaultValue: v1
+        - Name: PROMOTION_APPROVED_BY
+          DefaultValue: codepipeline/automatic
+        - Name: PROMOTION_REASON
+          DefaultValue: automatic model promotion after candidate verification
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: GitHubSource
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: '1'
+              Configuration:
+                ConnectionArn:
+                  Ref: GitHubConnectionArn
+                FullRepositoryId:
+                  Ref: GitHubFullRepositoryId
+                BranchName:
+                  Ref: GitHubBranch
+                OutputArtifactFormat: CODE_ZIP
+              OutputArtifacts:
+                - Name: SourceOutput
+              RunOrder: 1
+        - Name: Train
+          Actions:
+            - Name: TrainHouseModel
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName:
+                  Ref: HouseModelTrainProject
+                EnvironmentVariables:
+                  Fn::Sub: >-
+                    [{"name":"DATASET_VERSION","value":"#{variables.DATASET_VERSION}","type":"PLAINTEXT"},{"name":"HOUSE_DATASET_S3_VERSION_ID","value":"#{variables.DATASET_S3_VERSION_ID}","type":"PLAINTEXT"},{"name":"MODEL_VERSION","value":"#{variables.MODEL_VERSION}","type":"PLAINTEXT"}]
+              InputArtifacts:
+                - Name: SourceOutput
+              OutputArtifacts:
+                - Name: CandidateOutput
+              RunOrder: 1
+        - Fn::If:
+            - ManualPromotionApproval
+            - Name: Approval
+              Actions:
+                - Name: ApproveHouseCandidate
+                  ActionTypeId:
+                    Category: Approval
+                    Owner: AWS
+                    Provider: Manual
+                    Version: '1'
+                  Configuration:
+                    NotificationArn:
+                      Ref: HousePromotionNotificationTopic
+                    CustomData: Review the candidate release manifest, metrics, checksum, and S3 VersionId.
+                  RunOrder: 1
+            - Ref: AWS::NoValue
+        - Name: Promote
+          Actions:
+            - Name: PromoteHouseModel
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName:
+                  Ref: HouseModelPromotionProject
+                EnvironmentVariables:
+                  Fn::Sub: >-
+                    [{"name":"APPROVED_BY","value":"#{variables.PROMOTION_APPROVED_BY}","type":"PLAINTEXT"},{"name":"APPROVAL_REASON","value":"#{variables.PROMOTION_REASON}","type":"PLAINTEXT"}]
+              InputArtifacts:
+                - Name: CandidateOutput
+              OutputArtifacts:
+                - Name: ApprovedReleaseOutput
+              RunOrder: 1
+
+  HouseAppPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: house-pricing-app
+      PipelineType: V2
+      ExecutionMode: QUEUED
+      RestartExecutionOnUpdate: false
+      RoleArn:
+        Fn::GetAtt: [HouseCodePipelineRole, Arn]
+      ArtifactStore:
+        Type: S3
+        Location:
+          Ref: PipelineArtifactBucket
+        EncryptionKey:
+          Id: alias/aws/s3
+          Type: KMS
+      Variables:
+        - Name: HOUSE_MODEL_S3_BUCKET
+          DefaultValue:
+            Ref: HouseModelS3BucketName
+        - Name: HOUSE_MODEL_S3_KEY
+          DefaultValue:
+            Ref: HouseModelS3Key
+        - Name: HOUSE_MODEL_S3_VERSION_ID
+          DefaultValue: ''
+        - Name: HOUSE_MODEL_VERSION
+          DefaultValue: v1
+        - Name: HOUSE_DATASET_VERSION
+          DefaultValue: v1
+      Triggers:
+        - Provider: CodeStarSourceConnection
+          GitConfiguration:
+            SourceActionName: GitHubSource
+            Push:
+              - Branches:
+                  Includes:
+                    - main
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: GitHubSource
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: '1'
+              Configuration:
+                ConnectionArn:
+                  Ref: GitHubConnectionArn
+                FullRepositoryId:
+                  Ref: GitHubFullRepositoryId
+                BranchName:
+                  Ref: GitHubBranch
+                OutputArtifactFormat: CODE_ZIP
+              OutputArtifacts:
+                - Name: SourceOutput
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: BuildHouseAppImage
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName:
+                  Ref: HouseAppBuildProject
+              InputArtifacts:
+                - Name: SourceOutput
+              OutputArtifacts:
+                - Name: ImageOutput
+              RunOrder: 1
+        - Name: Deploy
+          Actions:
+            - Name: DeployHouseApp
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName:
+                  Ref: HouseAppDeployProject
+                EnvironmentVariables:
+                  Fn::Sub: >-
+                    [{"name":"HOUSE_MODEL_S3_BUCKET","value":"#{variables.HOUSE_MODEL_S3_BUCKET}","type":"PLAINTEXT"},{"name":"HOUSE_MODEL_S3_KEY","value":"#{variables.HOUSE_MODEL_S3_KEY}","type":"PLAINTEXT"},{"name":"HOUSE_MODEL_S3_VERSION_ID","value":"#{variables.HOUSE_MODEL_S3_VERSION_ID}","type":"PLAINTEXT"},{"name":"HOUSE_MODEL_VERSION","value":"#{variables.HOUSE_MODEL_VERSION}","type":"PLAINTEXT"},{"name":"HOUSE_DATASET_VERSION","value":"#{variables.HOUSE_DATASET_VERSION}","type":"PLAINTEXT"}]
+              InputArtifacts:
+                - Name: SourceOutput
+                - Name: ImageOutput
+              RunOrder: 1
+
+Metadata:
+  ExistingEcsTaskRoleContract:
+    ManagedExternally: true
+    HouseTaskRoleArn:
+      Ref: EcsTaskRoleArn
+    RoleArn:
+      Ref: EcsTaskRoleArn
+    RequiredPolicyName: house-pricing-model-read
+    RequiredStatement:
+      Effect: Allow
+      Actions:
+        - s3:GetObject
+        - s3:GetObjectVersion
+      Resource:
+        Fn::Sub: arn:${AWS::Partition}:s3:::${HouseModelS3BucketName}/${HouseModelS3Key}
+
+Outputs:
+  ArtifactBucketName:
+    Value:
+      Ref: PipelineArtifactBucket
+  PromotionNotificationTopicArn:
+    Value:
+      Ref: HousePromotionNotificationTopic
+  ModelPipelineName:
+    Value:
+      Ref: HouseModelPipeline
+  AppPipelineName:
+    Value:
+      Ref: HouseAppPipeline
