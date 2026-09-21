@@ -1,9 +1,9 @@
 """Environment-driven configuration for the Iris application."""
 
-from collections.abc import Mapping
-from dataclasses import dataclass
 import math
 import os
+from collections.abc import Mapping
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,7 +45,9 @@ def _confidence_threshold(environment: Mapping[str, str]) -> float:
     try:
         value = float(raw_value)
     except ValueError as error:
-        raise ValueError(f"{variable} must be a finite number between 0 and 1") from error
+        raise ValueError(
+            f"{variable} must be a finite number between 0 and 1"
+        ) from error
 
     if not math.isfinite(value) or not 0 <= value <= 1:
         raise ValueError(f"{variable} must be a finite number between 0 and 1")
