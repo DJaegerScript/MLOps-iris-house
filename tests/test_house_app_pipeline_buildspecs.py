@@ -58,6 +58,7 @@ def test_deployment_buildspec_uses_exact_releases_and_house_ecs_express() -> Non
     assert "aws ecs update-express-gateway-service" in buildspec
     assert '"logStreamPrefix": "house-pricing"' in buildspec
     assert '"name": "APP_VARIANT", "value": "house"' in buildspec
+    assert 'https://${endpoint}/_stcore/health' in buildspec
     assert '"/_stcore/health"' in buildspec
     assert "wait_for_ecs_express_deployment.sh" in buildspec
     assert "SUCCESSFUL" in buildspec

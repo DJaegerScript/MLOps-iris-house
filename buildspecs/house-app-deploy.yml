@@ -192,7 +192,7 @@ phases:
           --service-arn "$ECS_SERVICE_ARN" \
           --query 'service.activeConfigurations[0].ingressPaths[0].endpoint' \
           --output text)"
-        smoke_url="${PUBLIC_HEALTH_URL:-${endpoint}/_stcore/health}"
+        smoke_url="${PUBLIC_HEALTH_URL:-https://${endpoint}/_stcore/health}"
         curl --fail --silent --show-error "$smoke_url" >/dev/null
         python -c 'import json,sys; json.dump({"service_arn":sys.argv[1],"service_deployment_arn":sys.argv[2],"app_variant":"house","image_uri":sys.argv[3],"image_digest":sys.argv[4],"commit_sha":sys.argv[5],"house_model_version":sys.argv[6],"house_model_s3_version_id":sys.argv[7],"health_url":sys.argv[8],"status":"HEALTHY"}, open("output/deployment-summary.json", "w"), indent=2, sort_keys=True); open("output/deployment-summary.json", "a").write("\n")' \
           "$ECS_SERVICE_ARN" "$deployment_arn" "$IMAGE_URI" "$IMAGE_DIGEST" "$GIT_COMMIT_SHA" "$HOUSE_MODEL_VERSION" "$HOUSE_MODEL_S3_VERSION_ID" "$smoke_url"
