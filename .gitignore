@@ -1,0 +1,30 @@
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Model artifacts and datasets must stay outside source control.
+data/
+datasets/
+*.joblib
+*.onnx
+*.pkl
+*.pickle
+*.tar
+*.tar.gz
+
+# Credentials and local deployment output.
+credentials/
+*.pem
+*.key
+.docker/
