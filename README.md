@@ -326,7 +326,7 @@ aws s3api delete-objects \
 aws s3api delete-bucket --region "$AWS_REGION" --bucket iris-mlops-models-163918295215-apse3
 
 aws iam delete-role-policy --role-name iris-mlops-ecs-task-role --policy-name iris-mlops-model-read
-aws iam delete-role-policy --role-name iris-mlops-github-actions-role --policy-name iris-mlops-github-actions
+aws iam delete-role-policy --role-name iris-mlops-github-actions-role --policy-name iris-mlops-github-deploy
 aws iam delete-role --role-name iris-mlops-ecs-task-role
 aws iam delete-role --role-name iris-mlops-ecs-execution-role
 aws iam delete-role --role-name iris-mlops-ecs-infrastructure-role
