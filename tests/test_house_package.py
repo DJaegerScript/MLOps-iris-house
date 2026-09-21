@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-
 REPOSITORY_ROOT = Path(__file__).parents[1]
 FIXTURE_PATH = REPOSITORY_ROOT / "tests" / "fixtures" / "house_prices" / "train.csv"
 
