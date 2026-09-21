@@ -1,0 +1,56 @@
+{
+  "model_name": "iris-classifier",
+  "model_version": "v1",
+  "source": "https://huggingface.co/rajuamburu/iris-classifier",
+  "source_revision": "44b3ab8b94defd12e964f6327fa56c1efd7c4df6",
+  "features": [
+    "sepal_length",
+    "sepal_width",
+    "petal_length",
+    "petal_width"
+  ],
+  "classes": [
+    "setosa",
+    "versicolor",
+    "virginica"
+  ],
+  "class_label_normalization": {
+    "source_labels": [
+      "Iris-setosa",
+      "Iris-versicolor",
+      "Iris-virginica"
+    ],
+    "manifest_labels": [
+      "setosa",
+      "versicolor",
+      "virginica"
+    ],
+    "rule": "Removed the leading 'Iris-' prefix from source labels."
+  },
+  "framework": "scikit-learn",
+  "framework_version": "1.8.0",
+  "python_version": "not reported by source",
+  "artifact_checksums": {
+    "iris_model.pkl": "7774a99e5a30e7890fa1d75e5e2a44d14718f16b591334fde385d15ad03aa0a7",
+    "scaler.pkl": "10440ff9b1a4b0789ba496b6daffdb803e1bc68b1066a3dd82fcf2a45824daad",
+    "label_encoder.pkl": "59c14f9f5ffcd26188226746d0602c8552e0452045e6981138a8e946839ae45c",
+    "metadata.pkl": "7557328ea1eaa3c5e5a6bfd509e538a48f7f9e4a8905a0130f2ba6aa677ad05b"
+  },
+  "training_metrics": {
+    "algorithm": "LDA",
+    "probabilities_supported": true,
+    "cross_validation": {
+      "folds": 10,
+      "accuracy": 0.975
+    },
+    "test_accuracy": 1.0,
+    "sample_count": 150,
+    "class_count": 3,
+    "samples_per_class": 50,
+    "provenance": {
+      "document": "README.md",
+      "source": "https://huggingface.co/rajuamburu/iris-classifier",
+      "source_revision": "44b3ab8b94defd12e964f6327fa56c1efd7c4df6"
+    }
+  }
+}
