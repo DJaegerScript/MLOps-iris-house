@@ -223,6 +223,108 @@ class HouseReleaseManifest:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class HouseReleaseDraft:
+    """Pre-upload release metadata emitted by the training stage.
+
+    Training knows the input dataset VersionId, but the model VersionId is
+    assigned only by S3 after the bundle upload. This draft is not deployable;
+    registration must finalize it as a :class:`HouseReleaseManifest`.
+    """
+
+    model_name: str
+    model_version: str
+    dataset_version: str
+    dataset_s3_bucket: str
+    dataset_s3_key: str
+    dataset_s3_version_id: str
+    model_s3_bucket: str
+    model_s3_key: str
+    model_s3_version_id: str | None
+    bundle_sha256: str
+    mlflow_run_id: str
+    selected_model: str
+    metrics: Mapping[str, object]
+    git_commit_sha: str
+
+    def __post_init__(self) -> None:
+        for field in (
+            "model_name",
+            "model_version",
+            "dataset_version",
+            "dataset_s3_bucket",
+            "dataset_s3_key",
+            "dataset_s3_version_id",
+            "model_s3_bucket",
+            "model_s3_key",
+            "bundle_sha256",
+            "mlflow_run_id",
+            "selected_model",
+            "git_commit_sha",
+        ):
+            _require_nonempty_string(getattr(self, field), field)
+        if not _SHA256_PATTERN.fullmatch(self.bundle_sha256):
+            raise ReleaseValidationError("bundle_sha256 must be a SHA-256 checksum")
+        for field in (
+            "model_version",
+            "dataset_version",
+            "dataset_s3_bucket",
+            "dataset_s3_key",
+            "dataset_s3_version_id",
+            "model_s3_bucket",
+            "model_s3_key",
+        ):
+            if "latest" in getattr(self, field).lower():
+                raise ReleaseValidationError(
+                    f"{field} cannot contain mutable latest reference"
+                )
+        if self.model_s3_version_id is not None and "latest" in (
+            self.model_s3_version_id.lower()
+        ):
+            raise ReleaseValidationError(
+                "model_s3_version_id cannot contain mutable latest reference"
+            )
+        if not isinstance(self.metrics, Mapping):
+            raise ReleaseValidationError("metrics must be a JSON object")
+        try:
+            safe_metrics = json.loads(json.dumps(dict(self.metrics), sort_keys=True))
+        except (TypeError, ValueError) as error:
+            raise ReleaseValidationError("metrics must be JSON-safe") from error
+        object.__setattr__(self, "metrics", _freeze_json(safe_metrics))
+
+    def to_dict(self) -> dict[str, object]:
+        """Return the non-deployable draft in the release artifact shape."""
+
+        return {
+            "model_name": self.model_name,
+            "model_version": self.model_version,
+            "registry_version": None,
+            "dataset_version": self.dataset_version,
+            "dataset_s3_bucket": self.dataset_s3_bucket,
+            "dataset_s3_key": self.dataset_s3_key,
+            "dataset_s3_version_id": self.dataset_s3_version_id,
+            "model_s3_bucket": self.model_s3_bucket,
+            "model_s3_key": self.model_s3_key,
+            "model_s3_version_id": self.model_s3_version_id,
+            "bundle_sha256": self.bundle_sha256,
+            "mlflow_run_id": self.mlflow_run_id,
+            "selected_model": self.selected_model,
+            "metrics": _thaw_json(self.metrics),
+            "git_commit_sha": self.git_commit_sha,
+            "status": "training",
+        }
+
+    def to_json(self) -> str:
+        """Serialize the draft deterministically for CodePipeline handoff."""
+
+        return json.dumps(
+            self.to_dict(),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+
+
 def _require_nonempty_string(value: object, field: str) -> None:
     if not isinstance(value, str) or not value.strip():
         raise ReleaseValidationError(f"{field} must be a non-empty string")
@@ -246,4 +348,8 @@ def _thaw_json(value: object) -> object:
     return value
 
 
-__all__ = ["HouseReleaseManifest", "ReleaseValidationError"]
+__all__ = [
+    "HouseReleaseDraft",
+    "HouseReleaseManifest",
+    "ReleaseValidationError",
+]

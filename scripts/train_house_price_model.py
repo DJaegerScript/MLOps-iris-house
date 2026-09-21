@@ -15,6 +15,7 @@ if __package__ in {None, ""}:
 
 from house_pricing_mlops.bundle import create_model_bundle
 from house_pricing_mlops.provenance import build_dataset_provenance
+from house_pricing_mlops.release import HouseReleaseDraft
 from house_pricing_mlops.schema import SchemaValidationError
 from house_pricing_mlops.tracking import MLflowTracker
 from house_pricing_mlops.training import TrainingConfig, train_house_price_model
@@ -34,6 +35,9 @@ def run_training(
     random_seed: int = 42,
     model_name: str = "house-price-model",
     model_version: str = "v1",
+    dataset_s3_bucket: str | None = None,
+    dataset_s3_key: str | None = None,
+    dataset_s3_version_id: str | None = None,
     model_s3_bucket: str | None = None,
     model_s3_key: str | None = None,
     model_s3_version_id: str | None = None,
@@ -96,6 +100,12 @@ def run_training(
         "random_seed": config.random_seed,
         "model_name": model_name,
         "model_version": model_version,
+        "dataset_s3_bucket": dataset_s3_bucket,
+        "dataset_s3_key": dataset_s3_key,
+        "dataset_s3_version_id": dataset_s3_version_id,
+        "model_s3_bucket": model_s3_bucket,
+        "model_s3_key": model_s3_key
+        or f"models/house-price/{model_version}/model.tar.gz",
         "bundle_path": str(bundle.path),
         "bundle_sha256": bundle.bundle_sha256,
         "s3_object": {
@@ -109,6 +119,36 @@ def run_training(
         json.dumps(summary, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    if all(
+        value
+        for value in (
+            dataset_s3_bucket,
+            dataset_s3_key,
+            dataset_s3_version_id,
+            model_s3_bucket,
+            model_s3_key or f"models/house-price/{model_version}/model.tar.gz",
+        )
+    ):
+        draft = HouseReleaseDraft(
+            model_name=model_name,
+            model_version=model_version,
+            dataset_version=provenance.dataset_version,
+            dataset_s3_bucket=str(dataset_s3_bucket),
+            dataset_s3_key=str(dataset_s3_key),
+            dataset_s3_version_id=str(dataset_s3_version_id),
+            model_s3_bucket=str(model_s3_bucket),
+            model_s3_key=model_s3_key
+            or f"models/house-price/{model_version}/model.tar.gz",
+            model_s3_version_id=model_s3_version_id,
+            bundle_sha256=bundle.bundle_sha256,
+            mlflow_run_id=tracked.run_id,
+            selected_model=result.selected_model_name,
+            metrics=result.test_metrics,
+            git_commit_sha=provenance.git_commit_sha,
+        )
+        (output_path / "release_manifest.json").write_text(
+            draft.to_json() + "\n", encoding="utf-8"
+        )
     return summary
 
 
@@ -122,6 +162,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--random-seed", type=int, default=42)
     parser.add_argument("--model-name", default="house-price-model")
     parser.add_argument("--model-version", default="v1")
+    parser.add_argument("--dataset-s3-bucket")
+    parser.add_argument("--dataset-s3-key")
+    parser.add_argument("--dataset-s3-version-id")
     parser.add_argument("--model-s3-bucket")
     parser.add_argument("--model-s3-key")
     parser.add_argument("--model-s3-version-id")
@@ -140,6 +183,9 @@ def main(argv: list[str] | None = None) -> int:
             random_seed=args.random_seed,
             model_name=args.model_name,
             model_version=args.model_version,
+            dataset_s3_bucket=args.dataset_s3_bucket,
+            dataset_s3_key=args.dataset_s3_key,
+            dataset_s3_version_id=args.dataset_s3_version_id,
             model_s3_bucket=args.model_s3_bucket,
             model_s3_key=args.model_s3_key,
             model_s3_version_id=args.model_s3_version_id,

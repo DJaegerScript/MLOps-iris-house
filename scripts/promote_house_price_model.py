@@ -30,6 +30,42 @@ def register_from_summary(
     s3_object = summary.get("s3_object")
     if not isinstance(s3_object, dict):
         raise RegistryError("training summary is missing S3 object metadata")
+    dataset_s3_bucket = summary.get("dataset_s3_bucket")
+    dataset_s3_key = summary.get("dataset_s3_key")
+    dataset_s3_version_id = summary.get("dataset_s3_version_id")
+    model_s3_bucket = summary.get("model_s3_bucket")
+    model_s3_key = summary.get("model_s3_key")
+    git_commit_sha = summary.get("git_commit_sha")
+    if all(
+        isinstance(value, str) and value.strip()
+        for value in (
+            dataset_s3_bucket,
+            dataset_s3_key,
+            dataset_s3_version_id,
+            model_s3_bucket,
+            model_s3_key,
+            git_commit_sha,
+        )
+    ):
+        manifest = registry.register_candidate_release(
+            model_name=str(summary.get("model_name", "")),
+            model_version=str(summary.get("model_version", "")),
+            run_id=str(summary.get("mlflow_run_id", "")),
+            dataset_version=str(summary.get("dataset_version", "")),
+            dataset_s3_bucket=dataset_s3_bucket,
+            dataset_s3_key=dataset_s3_key,
+            dataset_s3_version_id=dataset_s3_version_id,
+            bundle_sha256=str(summary.get("bundle_sha256", "")),
+            model_s3_bucket=model_s3_bucket,
+            model_s3_key=model_s3_key,
+            model_s3_version_id=s3_version_id or str(s3_object.get("version_id", "")),
+            selected_model=str(summary.get("selected_model", "")),
+            metrics=summary.get("metrics", {})
+            if isinstance(summary.get("metrics"), dict)
+            else {},
+            git_commit_sha=git_commit_sha,
+        )
+        return manifest.to_dict()
     return registry.register_candidate(
         model_name=str(summary.get("model_name", "")),
         model_version=str(summary.get("model_version", "")),
@@ -44,6 +80,22 @@ def register_from_summary(
         metrics=summary.get("metrics", {})
         if isinstance(summary.get("metrics"), dict)
         else {},
+    )
+
+
+def promote_release(
+    registry: VersionedModelRegistry,
+    registry_version: str,
+    *,
+    approved_by: str,
+    reason: str,
+) -> dict[str, object]:
+    """Promote one candidate and persist its approval metadata."""
+
+    return registry.promote_champion(
+        registry_version,
+        approved_by=approved_by,
+        reason=reason,
     )
 
 
@@ -75,7 +127,8 @@ def main(argv: list[str] | None = None) -> int:
                 s3_version_id=args.s3_version_id,
             )
         elif args.command == "promote":
-            result = registry.promote_champion(
+            result = promote_release(
+                registry,
                 args.registry_version,
                 approved_by=args.approved_by,
                 reason=args.reason,
