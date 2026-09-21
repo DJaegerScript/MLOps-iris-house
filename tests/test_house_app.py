@@ -293,3 +293,40 @@ def test_house_category_label_uses_readable_fallback() -> None:
     assert app._house_category_label("Neighborhood", "NorthWest_Corner") == (
         "North West Corner"
     )
+
+
+def test_house_runtime_variant_skips_product_selector_and_iris_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_st = FakeHouseStreamlit()
+    rendered: list[str] = []
+    monkeypatch.setattr(app, "st", fake_st)
+    monkeypatch.setenv("APP_VARIANT", "house")
+    monkeypatch.setattr(app, "_render_house_page", lambda: rendered.append("house"))
+    monkeypatch.setattr(
+        app,
+        "_selected_product",
+        lambda: pytest.fail("House runtime must not render product navigation"),
+    )
+
+    app.main()
+
+    assert rendered == ["house"]
+    assert fake_st.calls == [("set_page_config", {"page_title": "House Price Prediction", "page_icon": "🏠"})]
+
+
+def test_unsupported_runtime_variant_fails_safely(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_st = FakeHouseStreamlit()
+    monkeypatch.setattr(app, "st", fake_st)
+    monkeypatch.setenv("APP_VARIANT", "unknown")
+    monkeypatch.setattr(
+        app,
+        "_selected_product",
+        lambda: pytest.fail("Unsupported runtime must not render product navigation"),
+    )
+
+    app.main()
+
+    assert any("Unsupported application variant" in message for message in fake_st.errors)
