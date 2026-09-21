@@ -28,3 +28,7 @@ credentials/
 *.pem
 *.key
 .docker/
+mlruns/
+.kaggle/
+kaggle.json
+house-prices-*.zip
