@@ -742,6 +742,7 @@ Resources:
               Configuration:
                 ProjectName:
                   Ref: HouseAppDeployProject
+                PrimarySource: SourceOutput
                 EnvironmentVariables:
                   Fn::Sub: >-
                     [{"name":"HOUSE_MODEL_S3_BUCKET","value":"#{variables.HOUSE_MODEL_S3_BUCKET}","type":"PLAINTEXT"},{"name":"HOUSE_MODEL_S3_KEY","value":"#{variables.HOUSE_MODEL_S3_KEY}","type":"PLAINTEXT"},{"name":"HOUSE_MODEL_S3_VERSION_ID","value":"#{variables.HOUSE_MODEL_S3_VERSION_ID}","type":"PLAINTEXT"},{"name":"HOUSE_MODEL_VERSION","value":"#{variables.HOUSE_MODEL_VERSION}","type":"PLAINTEXT"},{"name":"HOUSE_DATASET_VERSION","value":"#{variables.HOUSE_DATASET_VERSION}","type":"PLAINTEXT"},{"name":"IMAGE_URI_OVERRIDE","value":"#{variables.IMAGE_URI_OVERRIDE}","type":"PLAINTEXT"},{"name":"IMAGE_DIGEST_OVERRIDE","value":"#{variables.IMAGE_DIGEST_OVERRIDE}","type":"PLAINTEXT"},{"name":"ROLLBACK_REASON","value":"#{variables.ROLLBACK_REASON}","type":"PLAINTEXT"}]
