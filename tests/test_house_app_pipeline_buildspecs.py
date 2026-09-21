@@ -37,6 +37,7 @@ def test_deployment_buildspec_uses_exact_releases_and_house_ecs_express() -> Non
     for name in (
         "image-release.json",
         "approved-release.json",
+        "CODEBUILD_SRC_DIR_ImageOutput",
         "APP_VARIANT",
         "HOUSE_MODEL_S3_BUCKET",
         "HOUSE_MODEL_S3_KEY",

@@ -24,6 +24,9 @@ phases:
         : "${ECS_INFRASTRUCTURE_ROLE_ARN:?ECS_INFRASTRUCTURE_ROLE_ARN is required}"
         : "${CLOUDWATCH_LOG_GROUP:?CLOUDWATCH_LOG_GROUP is required}"
         image_release="$(find "$CODEBUILD_SRC_DIR" -name image-release.json -print -quit)"
+        if [[ -z "$image_release" && -n "${CODEBUILD_SRC_DIR_ImageOutput:-}" ]]; then
+          image_release="$(find "$CODEBUILD_SRC_DIR_ImageOutput" -name image-release.json -print -quit)"
+        fi
         approved_release="$(find "$CODEBUILD_SRC_DIR" -name approved-release.json -print -quit)"
         test -n "$image_release"
         if [[ -z "$approved_release" ]]; then
