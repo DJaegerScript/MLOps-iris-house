@@ -171,14 +171,16 @@ Use the `rollback` command with the prior numbered version and an explicit
 reason to restore a known immutable artifact. The registry keeps the prior
 champion, approver, timestamp, and reason in its decision history.
 
-The manual GitHub Actions workflow
-`.github/workflows/train-house-price.yml` reads the exact dataset S3
-`VersionId`, installs the training-only dependencies, logs to the configured
-MLflow tracking URI, uploads the complete bundle, registers a candidate, and
-writes the run/model/version/metric information to the workflow summary. A
-separate protected `house-pricing-production` environment is required before
-the optional promotion job can assign `champion`; training does not deploy the
-application.
+The AWS `house-pricing-model` CodePipeline is the intended primary training
+path. It reads the exact dataset S3 `VersionId`, installs the training-only
+dependencies, trains with seed `42`, uploads the complete bundle, registers a
+candidate, and promotes according to the configured automatic/manual mode. A
+promoted release starts the separate application pipeline; training never
+deploys ECS directly.
+
+`.github/workflows/train-house-price.yml` remains a manual, approval-gated
+migration fallback. It is not an automatic production trigger and should be
+used only when the AWS pipeline is unavailable or being diagnosed.
 
 The verified real run selected `random_forest` by validation RMSE. Its
 untouched-test metrics were MAE `17098.44`, RMSE `27672.43`, R² `0.8994`, and
@@ -231,9 +233,14 @@ The exact House model remains pinned to S3 VersionId
 
 The public health endpoint, Iris prediction, House online prediction, labeled
 batch prediction, invalid batch validation, CloudWatch structured logs, and
-House Pricing custom metrics were verified after deployment. The training
-workflow is intentionally manual and production promotion remains an explicit
-operator decision; application deployment does not retrain the model.
+House Pricing custom metrics were verified after deployment. The AWS
+application pipeline is the intended primary deployment path. It follows
+`main`, builds the commit-tagged image, injects the exact approved House model
+`VersionId`, and updates the existing ECS Express service. The GitHub
+`.github/workflows/deploy.yml` workflow is retained as a break-glass fallback.
+Its automatic `push` job is skipped after repository variable
+`AWS_CODEPIPELINE_ACTIVE=true` is set following end-to-end AWS verification;
+manual dispatch remains available for recovery.
 
 The application reuses the existing private S3 bucket, ECR repository, ECS
 service, CloudWatch log group, and OIDC deployment pattern. House artifacts use
@@ -245,5 +252,5 @@ models/house-price/
 mlflow/
 ```
 
-See the repository README and the implementation plan for the remaining
-registry, CI/CD, IAM, deployment, rollback, and cleanup contracts.
+See the repository README and [`docs/aws-house-pricing.md`](aws-house-pricing.md)
+for the registry, CI/CD, IAM, deployment, rollback, and cleanup contracts.

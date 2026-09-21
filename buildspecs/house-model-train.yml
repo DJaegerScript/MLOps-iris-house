@@ -2,8 +2,12 @@ version: 0.2
 
 env:
   shell: bash
-  secrets-manager:
-    MLFLOW_TRACKING_URI: "house-mlops/mlflow:tracking_uri"
+  # A managed MLflow endpoint may be supplied later through a CodeBuild
+  # secrets-manager mapping. The verified deployment currently has no such
+  # endpoint or secret, so training uses an ephemeral local MLflow store and
+  # publishes an immutable tracking snapshot to S3.
+  variables:
+    MLFLOW_TRACKING_URI: file:///tmp/house-mlruns
 
 phases:
   install:
@@ -22,7 +26,6 @@ phases:
         : "${MODEL_VERSION:?MODEL_VERSION pipeline variable is required}"
         : "${HOUSE_MODEL_S3_BUCKET:?HOUSE_MODEL_S3_BUCKET is required}"
         : "${HOUSE_MODEL_S3_KEY:?HOUSE_MODEL_S3_KEY is required}"
-        : "${MLFLOW_TRACKING_URI:?MLFLOW_TRACKING_URI secret is required}"
         mkdir -p /tmp/house-training "$CODEBUILD_SRC_DIR/output"
         aws s3api get-object \
           --bucket "$HOUSE_DATASET_S3_BUCKET" \
@@ -46,6 +49,15 @@ phases:
           --model-version "$MODEL_VERSION" \
           --model-s3-bucket "$HOUSE_MODEL_S3_BUCKET" \
           --model-s3-key "$HOUSE_MODEL_S3_KEY"
+        if [[ -d /tmp/house-mlruns ]]; then
+          tar -czf /tmp/house-mlruns.tar.gz -C /tmp house-mlruns
+          aws s3api put-object \
+            --bucket "$HOUSE_MODEL_S3_BUCKET" \
+            --key "mlflow/house-prices/${DATASET_VERSION}/${CODEBUILD_BUILD_ID}.tar.gz" \
+            --body /tmp/house-mlruns.tar.gz \
+            --server-side-encryption AES256 \
+            --query VersionId --output text >/dev/null
+        fi
         model_version_id="$(aws s3api put-object \
           --bucket "$HOUSE_MODEL_S3_BUCKET" \
           --key "$HOUSE_MODEL_S3_KEY" \

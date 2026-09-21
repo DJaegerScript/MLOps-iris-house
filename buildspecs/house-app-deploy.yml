@@ -56,8 +56,14 @@ phases:
             raise SystemExit("approved House release is incomplete")
         if not image.get("image_uri") or not image.get("commit_sha") or not image.get("digest"):
             raise SystemExit("image release is incomplete")
+        if "latest" in image["image_uri"].lower() or not isinstance(image["digest"], str) or not __import__("re").fullmatch(r"sha256:[0-9a-f]{64}", image["digest"]):
+            raise SystemExit("image release must use an immutable sha256 digest")
         PY
         export IMAGE_URI="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["image_uri"])' "$image_release")"
+        export IMAGE_DIGEST="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["digest"])' "$image_release")"
+        [[ "$IMAGE_URI" != *latest* ]] || { echo "mutable image reference is forbidden" >&2; exit 1; }
+        [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "invalid image digest" >&2; exit 1; }
+        export IMAGE_REF="${IMAGE_URI%@*}@${IMAGE_DIGEST}"
         export GIT_COMMIT_SHA="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["commit_sha"])' "$image_release")"
         export DOCKER_IMAGE_VERSION="$GIT_COMMIT_SHA"
         export HOUSE_MODEL_S3_BUCKET="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["model_s3_bucket"])' "$approved_release")"
@@ -116,6 +122,7 @@ phases:
         HOUSE_MODEL_VERSION="$HOUSE_MODEL_VERSION" \
         HOUSE_DATASET_VERSION="$HOUSE_DATASET_VERSION" \
         IMAGE_URI="$IMAGE_URI" \
+        IMAGE_REF="$IMAGE_REF" \
         GIT_COMMIT_SHA="$GIT_COMMIT_SHA" \
         DOCKER_IMAGE_VERSION="$DOCKER_IMAGE_VERSION" \
         CLOUDWATCH_LOG_GROUP="$CLOUDWATCH_LOG_GROUP" \
@@ -125,7 +132,7 @@ phases:
         from pathlib import Path
 
         primary_container = {
-            "image": os.environ["IMAGE_URI"],
+            "image": os.environ["IMAGE_REF"],
             "containerPort": 8501,
             "awsLogsConfiguration": {
                 "logGroup": os.environ["CLOUDWATCH_LOG_GROUP"],
@@ -168,8 +175,8 @@ phases:
           --output text)"
         smoke_url="${PUBLIC_HEALTH_URL:-${endpoint}/_stcore/health}"
         curl --fail --silent --show-error "$smoke_url" >/dev/null
-        python -c 'import json,sys; json.dump({"image_uri":sys.argv[1],"commit_sha":sys.argv[2],"house_model_version":sys.argv[3],"house_model_s3_version_id":sys.argv[4],"health_url":sys.argv[5],"status":"HEALTHY"}, open("output/deployment-summary.json", "w"), indent=2, sort_keys=True); open("output/deployment-summary.json", "a").write("\n")' \
-          "$IMAGE_URI" "$GIT_COMMIT_SHA" "$HOUSE_MODEL_VERSION" "$HOUSE_MODEL_S3_VERSION_ID" "$smoke_url"
+        python -c 'import json,sys; json.dump({"image_uri":sys.argv[1],"image_digest":sys.argv[2],"commit_sha":sys.argv[3],"house_model_version":sys.argv[4],"house_model_s3_version_id":sys.argv[5],"health_url":sys.argv[6],"status":"HEALTHY"}, open("output/deployment-summary.json", "w"), indent=2, sort_keys=True); open("output/deployment-summary.json", "a").write("\n")' \
+          "$IMAGE_URI" "$IMAGE_DIGEST" "$GIT_COMMIT_SHA" "$HOUSE_MODEL_VERSION" "$HOUSE_MODEL_S3_VERSION_ID" "$smoke_url"
 
 artifacts:
   files:

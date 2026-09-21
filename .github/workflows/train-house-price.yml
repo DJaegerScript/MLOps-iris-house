@@ -1,4 +1,7 @@
-name: Train House Pricing model
+# Migration fallback: the AWS CodePipeline model path is the intended primary
+# path once its CodeConnections source has been configured. Keep this manual,
+# approval-gated workflow available as a break-glass training path.
+name: Train House Pricing model (migration fallback)
 
 on:
   workflow_dispatch:

@@ -76,6 +76,11 @@ Conditions:
     Fn::Equals:
       - Ref: ModelPromotionMode
       - manual
+  HasMlflowTrackingSecret:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: MlflowTrackingSecretArn
+          - ''
 
 Resources:
   PipelineArtifactBucket:
@@ -205,11 +210,19 @@ Resources:
                   - s3:GetObjectVersion
                 Resource:
                   Fn::Sub: ${PipelineArtifactBucket.Arn}/*
-              - Sid: ReadTrackingConfiguration
+              - Fn::If:
+                  - HasMlflowTrackingSecret
+                  - Sid: ReadTrackingConfiguration
+                    Effect: Allow
+                    Action: secretsmanager:GetSecretValue
+                    Resource:
+                      Ref: MlflowTrackingSecretArn
+                  - Ref: AWS::NoValue
+              - Sid: WriteTrackingSnapshot
                 Effect: Allow
-                Action: secretsmanager:GetSecretValue
+                Action: s3:PutObject
                 Resource:
-                  Ref: MlflowTrackingSecretArn
+                  Fn::Sub: arn:${AWS::Partition}:s3:::${HouseModelS3BucketName}/mlflow/house-prices/*
               - Sid: WriteBuildLogs
                 Effect: Allow
                 Action:
@@ -693,6 +706,9 @@ Resources:
               Configuration:
                 ProjectName:
                   Ref: HouseAppBuildProject
+                EnvironmentVariables:
+                  Fn::Sub: >-
+                    [{"name":"IMAGE_URI_OVERRIDE","value":"#{variables.IMAGE_URI_OVERRIDE}","type":"PLAINTEXT"},{"name":"IMAGE_DIGEST_OVERRIDE","value":"#{variables.IMAGE_DIGEST_OVERRIDE}","type":"PLAINTEXT"},{"name":"ROLLBACK_REASON","value":"#{variables.ROLLBACK_REASON}","type":"PLAINTEXT"}]
               InputArtifacts:
                 - Name: SourceOutput
               OutputArtifacts:

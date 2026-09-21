@@ -73,7 +73,7 @@
   },
   {
     "ParameterKey": "MlflowTrackingSecretArn",
-    "ParameterValue": "arn:aws:secretsmanager:ap-southeast-3:163918295215:secret:REPLACE_WITH_MLFLOW_SECRET"
+    "ParameterValue": ""
   },
   {
     "ParameterKey": "ModelPromotionMode",

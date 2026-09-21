@@ -1,4 +1,7 @@
-name: Deploy Iris MLOps application
+# Migration fallback: set repository variable AWS_CODEPIPELINE_ACTIVE=true
+# only after both AWS pipelines have passed end-to-end verification. Until
+# then, this OIDC workflow remains the guarded production fallback.
+name: Deploy Iris MLOps application (migration fallback)
 
 on:
   push:
@@ -44,6 +47,7 @@ env:
 jobs:
   deploy:
     name: Build, push, and deploy
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.AWS_CODEPIPELINE_ACTIVE != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source

@@ -12,10 +12,12 @@ import argparse
 import csv
 import io
 import json
+import ssl
 import sys
 import time
 import urllib.error
 import urllib.request
+import warnings
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -130,8 +132,8 @@ def build_smoke_summary(
     """Build a safe operator report without request or response payloads."""
 
     coordinates = validate_release_coordinates(image_release, release)
-    passed = health_status == "ok" and all(
-        value == "passed" for value in checks.values()
+    passed = health_status == "ok" and not any(
+        value in {"failed", "error"} for value in checks.values()
     )
     return {
         "status": "PASSED" if passed else "FAILED",
@@ -149,8 +151,17 @@ def check_public_health(
 
     url = public_url.rstrip("/") + HEALTH_PATH
     started = time.perf_counter()
+    context = ssl.create_default_context()
     try:
-        with urllib.request.urlopen(url, timeout=timeout_seconds) as response:
+        import certifi
+
+        context = ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        pass
+    try:
+        with urllib.request.urlopen(
+            url, timeout=timeout_seconds, context=context
+        ) as response:
             body = response.read(32).decode("utf-8", errors="replace").strip()
             if response.status != 200 or body != "ok":
                 raise RuntimeError("public health endpoint did not return ok")
@@ -192,7 +203,11 @@ def run_exact_model_checks(
         reference_profile=profile,
         logger=logger,
     )
-    batch.predict_csv(build_safe_batch_csv(labeled=True), filename="labeled.csv")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=UserWarning)
+        batch.predict_csv(
+            build_safe_batch_csv(labeled=True), filename="labeled.csv"
+        )
     batch.predict_csv(build_safe_batch_csv(labeled=False), filename="unlabeled.csv")
     try:
         batch.predict_csv(

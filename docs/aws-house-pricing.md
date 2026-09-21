@@ -46,10 +46,13 @@ the configured House model object; this stack does not broaden it or grant a
 wildcard model prefix.
 
 The GitHub CodeConnections ARN and MLflow Secrets Manager ARN are deployment
-inputs. Values are not committed to the repository. The CodeBuild training
-role reads the configured tracking secret, while model and application roles
-receive only their pipeline-specific S3, ECR, SSM, ECS, and `iam:PassRole`
-permissions.
+inputs when those services are used. The verified account currently has no
+CodeConnections connection and no MLflow Secrets Manager secret, so the
+parameter file leaves both values unresolved and the training buildspec uses
+an ephemeral local MLflow store plus an immutable S3 tracking snapshot. Do not
+deploy the stack until a real CodeConnections ARN is supplied. If a managed
+MLflow endpoint is later introduced, provide its secret ARN and enable the
+conditional training-role permission.
 
 The deployed application receives the exact House model S3 key and `VersionId`
 through non-secret GitHub environment variables. The application does not
@@ -219,3 +222,13 @@ setosa prediction, House online prediction, labeled and invalid House batch
 validation, structured CloudWatch logs, and House Pricing custom metrics. The
 training workflow remains manual and does not retrain during application
 deployment.
+
+## Migration status
+
+The local implementation and CloudFormation template are validated, but no
+House CodePipeline or pipeline artifact bucket has been created. The live ECS
+Express service is active, the exact task-role House read policy is present,
+and the known dataset/model S3 versions are readable. Live pipeline execution
+is blocked until an authorized operator creates or supplies an AWS
+CodeConnections GitHub connection ARN. No AWS resource creation or production
+pipeline execution is performed with the placeholder ARN.
