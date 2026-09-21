@@ -312,7 +312,12 @@ def test_house_runtime_variant_skips_product_selector_and_iris_path(
     app.main()
 
     assert rendered == ["house"]
-    assert fake_st.calls == [("set_page_config", {"page_title": "House Price Prediction", "page_icon": "🏠"})]
+    assert fake_st.calls == [
+        (
+            "set_page_config",
+            {"page_title": "House Price Prediction", "page_icon": "🏠"},
+        )
+    ]
 
 
 def test_unsupported_runtime_variant_fails_safely(
@@ -329,4 +334,6 @@ def test_unsupported_runtime_variant_fails_safely(
 
     app.main()
 
-    assert any("Unsupported application variant" in message for message in fake_st.errors)
+    assert any(
+        "Unsupported application variant" in message for message in fake_st.errors
+    )
