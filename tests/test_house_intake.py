@@ -1,5 +1,8 @@
 """Tests for the offline House Prices dataset intake boundary."""
 
+import json
+import subprocess
+import sys
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -111,3 +114,26 @@ def test_intake_reports_missing_input_without_fabricating_results(
             dataset_version="v1",
             output_dir=tmp_path / "out",
         )
+
+
+def test_intake_script_runs_from_repository_root_without_package_install(
+    tmp_path: Path,
+) -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/intake_house_price_dataset.py",
+            "--input",
+            str(FIXTURE_PATH),
+            "--dataset-version",
+            "fixture-v1",
+            "--output-dir",
+            str(tmp_path),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout)["source_url"] == FIXTURE_SOURCE_URL

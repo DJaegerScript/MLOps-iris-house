@@ -10,6 +10,9 @@ from pathlib import Path
 
 import pandas as pd
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
 from house_pricing_mlops.bundle import create_model_bundle
 from house_pricing_mlops.provenance import build_dataset_provenance
 from house_pricing_mlops.schema import SchemaValidationError

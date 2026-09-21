@@ -22,6 +22,9 @@ from zipfile import BadZipFile, ZipFile
 
 import pandas as pd
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
 from house_pricing_mlops.provenance import (
     DEFAULT_DATASET_SOURCE_URL,
     build_dataset_provenance,
