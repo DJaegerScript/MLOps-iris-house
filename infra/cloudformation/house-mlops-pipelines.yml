@@ -644,6 +644,7 @@ Resources:
               Configuration:
                 ProjectName:
                   Ref: HouseModelPromotionProject
+                PrimarySource: SourceOutput
                 EnvironmentVariables:
                   Fn::Sub: >-
                     [{"name":"APPROVED_BY","value":"#{variables.PROMOTION_APPROVED_BY}","type":"PLAINTEXT"},{"name":"APPROVAL_REASON","value":"#{variables.PROMOTION_REASON}","type":"PLAINTEXT"}]
