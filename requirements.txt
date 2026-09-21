@@ -1,1 +1,4 @@
-# Task 1 uses only the Python standard library at runtime.
+# Runtime dependencies for the S3-backed, pre-trained Iris artifact loader.
+boto3>=1.35,<2
+joblib>=1.4,<2
+scikit-learn>=1.8,<1.9
