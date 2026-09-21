@@ -1,9 +1,9 @@
 # AWS House Pricing operations
 
-House Pricing is deployed as a second lazy page in the existing Iris
-Streamlit service. The intended AWS boundary is account `163918295215`, Region
-`ap-southeast-3`, and the existing private/versioned bucket
-`iris-mlops-models-163918295215-apse3`.
+House Pricing is deployed as a separate House-only ECS Express service. Iris
+remains deployed on the existing `iris-mlops` service and endpoint. The
+intended AWS boundary is account `163918295215`, Region `ap-southeast-3`, and
+the existing private/versioned bucket `iris-mlops-models-163918295215-apse3`.
 
 Shared resources:
 
@@ -11,8 +11,11 @@ Shared resources:
 | --- | --- |
 | S3 bucket | `iris-mlops-models-163918295215-apse3` |
 | ECR repository | `iris-mlops` |
-| ECS cluster/service | `iris-mlops` / `iris-mlops` |
+| ECS cluster | `iris-mlops` |
+| Iris ECS service | `iris-mlops` |
+| House ECS service | `house-pricing` |
 | CloudWatch log group | `/aws/ecs/iris-mlops` |
+| House log group | `/aws/ecs/house-pricing` |
 | Region | `ap-southeast-3` |
 
 House-specific immutable prefixes are:
@@ -35,14 +38,15 @@ pipelines and four scoped CodeBuild projects:
   `ModelPromotionMode=manual` enables the optional SNS-backed manual approval
   action when a human gate is required.
 - `house-pricing-app` follows the GitHub `main` branch, builds the commit SHA
-  image, and deploys the existing ECS Express Mode service through the custom
-  CodeBuild deployment action.
+  image, and creates or updates only the `house-pricing` ECS Express service
+  through the custom CodeBuild deployment action.
 
-The stack creates only pipeline, artifact-bucket, notification-topic,
-CodeBuild, and pipeline-role resources. The existing ECS service, execution
-role, and task role are passed as parameters and remain externally managed.
-The task role must retain the exact `house-pricing-model-read` statement for
-the configured House model object; this stack does not broaden it or grant a
+The stack creates pipeline, artifact-bucket, notification-topic, CodeBuild,
+House task-role, and House log-group resources. It reuses the existing ECS
+cluster, execution role, and infrastructure role. The existing Iris ECS
+service and Iris task role remain outside this House deployment path. The
+House task role contains the exact `house-pricing-model-read` statement for
+the configured House model object; it does not broaden access or grant a
 wildcard model prefix.
 
 The legacy GitHub OAuth source uses a GitHub token stored in Secrets Manager
@@ -56,23 +60,23 @@ introduced, provide its secret ARN and enable the conditional training-role
 permission.
 
 The deployed application receives the exact House model S3 key and `VersionId`
-through non-secret GitHub environment variables. The application does not
-load a mutable `latest` object. The verified current coordinates are:
+through non-secret CodePipeline variables. The application does not load a
+mutable `latest` object. The currently approved champion coordinates are:
 
 ```text
 dataset key:        datasets/house-prices/v1/train.csv
 dataset VersionId:  2IzOEQWUuttBf0c5gkW0X8kR5cr6j7d9
 model key:          models/house-price/v1/model.tar.gz
-model VersionId:    XWYuPZ9y7F2dzZNIubOZML49TgOjKl_D
-model version:      v1
+model VersionId:    LjgOhvO7DCyHV7KoNMVGyJ0ux2Gui51X
+model version:      v2
 dataset version:    v1
 ```
 
 ## IAM boundary
 
-The existing ECS task role remains responsible for the Iris exact-object read.
-The separate inline policy named `house-pricing-model-read` is installed and
-verified on the same task role with only these actions and one exact resource:
+The dedicated House ECS task role owns the House exact-object read. The inline
+policy named `house-pricing-model-read` has only these actions and one exact
+resource:
 
 ```json
 {
@@ -95,33 +99,25 @@ operations.
 
 ## Deployment configuration
 
-The existing `.github/workflows/deploy.yml` keeps the Iris variables and adds:
-
-```text
-HOUSE_MODEL_S3_BUCKET
-HOUSE_MODEL_S3_KEY
-HOUSE_MODEL_S3_VERSION_ID
-HOUSE_MODEL_VERSION
-HOUSE_DATASET_VERSION
-HOUSE_ENVIRONMENT
-```
-
-AWS authentication remains GitHub OIDC through the existing deployment role;
-no access key or secret is stored in GitHub variables. The workflow keeps the
-commit SHA as the image tag, updates the existing ECS Express Mode service, and
-waits for `SUCCESSFUL` deployment status and the existing `/_stcore/health`
-path. Its summary reports both Iris and House versions.
+The existing `.github/workflows/deploy.yml` remains the Iris-owned deployment
+path and continues to target the existing Iris service. House deployment is
+handled by `house-pricing-app`, not by that workflow. The House task receives
+`APP_VARIANT=house`, the exact approved model coordinates, and the
+`/aws/ecs/house-pricing` log group. AWS authentication for the House pipeline
+uses its scoped CodeBuild roles; no access key or secret is stored in GitHub.
 
 ## Verification and rollback
 
-After a deployment, verify the public endpoint, Streamlit health, Iris sample
-prediction, House sample prediction, labeled and unlabeled batch behavior,
-invalid CSV handling, CloudWatch JSON events, and House EMF metrics. Keep the
-prior image tag, prior House model `VersionId`, and prior champion registry
-version together as the rollback record.
+After a House deployment, verify the House endpoint, Streamlit health, House
+sample prediction, labeled and unlabeled batch behavior, invalid CSV handling,
+CloudWatch JSON events, and House EMF metrics. Separately confirm Iris remains
+healthy on its existing endpoint. Keep the prior image tag, prior House model
+`VersionId`, and prior champion registry version together as the rollback
+record.
 
-Rollback consists of restoring the previous immutable image tag and exact
-House S3 `VersionId`, then waiting for the ECS deployment to become successful.
+House rollback consists of restoring the previous immutable image tag and
+exact House S3 `VersionId` through `house-pricing-app`, then waiting for the
+House ECS deployment to become successful. It never targets `iris-mlops`.
 If the model itself is rolled back, use the explicit registry rollback command
 and record the approver and reason. Never overwrite an object and never delete
 the prior version before verification.
@@ -149,26 +145,27 @@ approval action before approving it. Promotion writes the champion release
 pointer and starts `house-pricing-app` with the exact model coordinates.
 
 For a code-only release, the app pipeline follows `main`, resolves the current
-approved release once, builds the commit-tagged image, and deploys the existing
-ECS Express service. The deployment verifies the task-role policy, waits for a
-new `SUCCESSFUL` deployment, checks `/_stcore/health`, and produces a safe
-deployment summary. The smoke harness reports only immutable coordinates,
-statuses, counts, and latency:
+approved release once, builds the commit-tagged image, and deploys only the
+House ECS Express service. The deployment verifies the dedicated task-role
+policy, waits for a new `SUCCESSFUL` deployment, checks `/_stcore/health`, and
+produces a safe deployment summary. The smoke harness reports only immutable
+coordinates, statuses, counts, and latency:
 
 ```bash
 python scripts/codepipeline/smoke_test_house_release.py \
-  --public-url https://ir-c1c8733af56f4191b9c1d512f141541f.ecs.ap-southeast-3.on.aws \
+  --public-url https://<house-endpoint> \
   --approved-release /path/to/approved-release.json \
   --image-release /path/to/image-release.json \
   --region ap-southeast-3
 ```
 
-The harness checks the public health endpoint, a safe Iris/UI check marker,
-House online prediction, labeled and unlabeled CSV behavior, and invalid CSV
-rejection. It uses an in-memory safe fixture and never reports rows, addresses,
-identifiers, credentials, or prediction values. Use `--skip-model` only for a
-health-only check when the operator does not have read access to the exact
-House model object.
+The harness checks the House public health endpoint, a safe Iris/UI check
+marker, House online prediction, labeled and unlabeled CSV behavior, and
+invalid CSV rejection. It identifies the deployment service as
+`house-pricing`, uses an in-memory safe fixture, and never reports rows,
+addresses, identifiers, credentials, or prediction values. Use `--skip-model`
+only for a health-only check when the operator does not have read access to the
+exact House model object.
 
 Keep the previous image digest and previous champion release manifest together
 as the rollback record. Roll back by starting a normal app-pipeline execution
@@ -197,39 +194,28 @@ rollback reason in the release handoff without copying raw input data.
 
 ## Cost and cleanup
 
-This feature reuses the existing ECS, ECR, S3, and CloudWatch resources. MLflow
-tracking-server, SageMaker, ECS, CloudWatch, S3, ECR, and data-transfer charges
-may apply if additional managed resources are enabled. Review the existing
-`iris-mlops-monthly` budget before creating any new service.
+This feature reuses the existing ECS cluster, ECR, S3, and region while adding
+one House ECS Express service and House log group. MLflow tracking-server,
+SageMaker, ECS, CloudWatch, S3, ECR, and data-transfer charges may apply if
+additional managed resources are enabled. Review the existing
+`iris-mlops-monthly` budget before creating the House service.
 
 Do not delete shared resources during feature verification. For eventual
 cleanup, first confirm ownership, stop the ECS service, remove only the House
 model/dataset/MLflow object versions, and retain the Iris object and shared
 logging/alerting resources unless the whole project is intentionally retired.
 
-The candidate-to-champion promotion was explicitly approved by `DJaegerScript`
-for registry version `1`, with the decision recorded in the immutable S3 audit
-object
-`mlflow/registry/house-price-model/v1-champion-78c798da18f14485aea9f8376308b438.json`.
-The production deployment completed successfully in GitHub Actions run
-`35607090494` using image tag
-`98105435797360ee5bb5e1e16de3b22cbe028088` and ECR digest
-`sha256:4cbcfc177ab1a753e9cb8bc7302c1622db80f07fd5a8b1dad70780a242055539`.
-The ECS deployment revision was
-`arn:aws:ecs:ap-southeast-3:163918295215:service-deployment/iris-mlops/iris-mlops/Z27gI_k-WPAQ1Tpe4sEhv`.
-
-Post-deployment verification confirmed the public health endpoint, Iris
-setosa prediction, House online prediction, labeled and invalid House batch
-validation, structured CloudWatch logs, and House Pricing custom metrics. The
-training workflow remains manual and does not retrain during application
+The Iris service baseline is intentionally preserved by this House pipeline.
+After the first separated House deployment, append its endpoint, image digest,
+House model `VersionId`, deployment ARN, health result, and smoke summary here.
+The training workflow remains manual and does not retrain during application
 deployment.
 
 ## Migration status
 
-The local implementation and CloudFormation template are validated, but no
-House CodePipeline or pipeline artifact bucket has been created. The live ECS
-Express service is active, the exact task-role House read policy is present,
-and the known dataset/model S3 versions are readable. Live pipeline execution
-is blocked until an authorized operator creates or supplies the GitHub OAuth
-token secret with the required scopes. No AWS resource creation or production
-pipeline execution is performed with the placeholder token secret ARN.
+The separated local implementation and CloudFormation template are validated.
+The existing Iris ECS Express service remains the preservation baseline. The
+House pipeline uses the legacy GitHub OAuth source and webhook required for
+`ap-southeast-3`; its House service creation and deployment evidence are
+recorded after the AWS review checkpoint. No House pipeline action is allowed
+to target the existing `iris-mlops/iris-mlops` service.

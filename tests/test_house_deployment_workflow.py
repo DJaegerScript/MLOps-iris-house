@@ -49,12 +49,16 @@ def test_deployment_policy_check_is_exact_house_model_read_scope() -> None:
     assert "/*" not in workflow
 
 
-def test_aws_house_guide_names_shared_resources_and_rollback_contract() -> None:
+def test_aws_house_guide_names_separate_services_and_rollback_contract() -> None:
     guide = (ROOT / "docs" / "aws-house-pricing.md").read_text(encoding="utf-8")
 
     assert "ap-southeast-3" in guide
     assert "iris-mlops-models-163918295215-apse3" in guide
     assert "/aws/ecs/iris-mlops" in guide
+    assert "/aws/ecs/house-pricing" in guide
+    assert "house-pricing" in guide
+    assert "APP_VARIANT=house" in guide
+    assert "Iris remains" in guide
     assert "models/house-price/" in guide
     assert "VersionId" in guide
     assert "rollback" in guide.lower()

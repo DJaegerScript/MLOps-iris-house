@@ -39,6 +39,7 @@ from iris_mlops.storage import S3ArtifactStore
 from scripts.codepipeline.validate_house_release import load_release
 
 HEALTH_PATH = "/_stcore/health"
+HOUSE_DEPLOYMENT_SERVICE_NAME = "house-pricing"
 _IMAGE_DIGEST_PREFIX = "sha256:"
 
 
@@ -137,6 +138,7 @@ def build_smoke_summary(
     )
     return {
         "status": "PASSED" if passed else "FAILED",
+        "deployment_service": HOUSE_DEPLOYMENT_SERVICE_NAME,
         "health_status": health_status,
         "latency_ms": round(float(latency_ms), 3),
         "checks": dict(sorted(checks.items())),

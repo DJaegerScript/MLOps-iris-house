@@ -57,6 +57,7 @@ def test_smoke_coordinates_and_report_are_safe_and_complete() -> None:
     assert coordinates["house_model_s3_version_id"] == "model-version-2"
     assert summary["image_digest"] == image["digest"]
     assert summary["house_model_version"] == "v2"
+    assert summary["deployment_service"] == "house-pricing"
     assert summary["health_status"] == "ok"
     assert "Address" not in json.dumps(summary)
     assert "SalePrice" not in json.dumps(summary)
