@@ -226,7 +226,7 @@ def _render_house_page() -> None:
         f"Schema: house-price-v1"
     )
 
-    st.subheader("Single-property prediction")
+    st.subheader("Property prediction")
     features: dict[str, object] = {}
     for feature in NUMERIC_FEATURES:
         features[feature] = st.number_input(
