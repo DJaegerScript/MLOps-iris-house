@@ -33,6 +33,7 @@ def _settings():
 
 def _features() -> dict[str, object]:
     values: dict[str, object] = {feature: 1.0 for feature in NUMERIC_FEATURES}
+    values["YearBuilt"] = 2000.0
     values.update({feature: "known" for feature in CATEGORICAL_FEATURES})
     return values
 
