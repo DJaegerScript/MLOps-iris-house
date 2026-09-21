@@ -6,7 +6,6 @@ import pytest
 
 from iris_mlops.config import Settings, load_config
 
-
 REQUIRED_ENVIRONMENT = {
     "IRIS_MODEL_S3_BUCKET": "iris-models-example",
     "IRIS_MODEL_S3_KEY": "models/iris-classifier/v1/bundle.tar.gz",
