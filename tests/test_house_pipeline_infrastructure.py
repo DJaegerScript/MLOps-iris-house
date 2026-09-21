@@ -63,6 +63,30 @@ def test_template_uses_separate_scoped_roles_without_static_keys_or_task_wildcar
     assert "models/house-price/v1/model.tar.gz/*" not in template
 
 
+def test_template_defines_isolated_house_ecs_target_and_runtime_contract() -> None:
+    template = TEMPLATE.read_text(encoding="utf-8")
+
+    for name in (
+        "HouseEcsServiceArn",
+        "HouseEcsServiceName",
+        "HouseEcsClusterArn",
+        "HouseEcsTaskRoleArn",
+        "HouseCloudWatchLogGroupName",
+        "EcsInfrastructureRoleArn",
+        "HouseEcsTaskRole",
+        "HouseCloudWatchLogGroup",
+    ):
+        assert name in template
+    assert "house-pricing" in template
+    assert "/aws/ecs/house-pricing" in template
+    assert "APP_VARIANT" in template
+
+    deploy_project = template[template.index("HouseAppDeployProject") :]
+    assert "Ref: EcsServiceArn" not in deploy_project
+    assert "Ref: HouseEcsServiceArn" in deploy_project
+    assert "Ref: HouseEcsTaskRoleArn" in deploy_project
+
+
 def test_production_parameter_file_has_no_secret_values() -> None:
     assert PARAMETERS.is_file(), "production parameter file is missing"
     parameters = PARAMETERS.read_text(encoding="utf-8")
