@@ -106,7 +106,19 @@ cleanup, first confirm ownership, stop the ECS service, remove only the House
 model/dataset/MLflow object versions, and retain the Iris object and shared
 logging/alerting resources unless the whole project is intentionally retired.
 
-The ECS deployment is still pending the explicit candidate-to-champion
-promotion decision. The local AppTest and direct S3 serving checks already
-verified Iris routing, House lazy loading, online prediction, labeled batch
-metrics, and structured logs against the exact model VersionId above.
+The candidate-to-champion promotion was explicitly approved by `DJaegerScript`
+for registry version `1`, with the decision recorded in the immutable S3 audit
+object
+`mlflow/registry/house-price-model/v1-champion-78c798da18f14485aea9f8376308b438.json`.
+The production deployment completed successfully in GitHub Actions run
+`35607090494` using image tag
+`98105435797360ee5bb5e1e16de3b22cbe028088` and ECR digest
+`sha256:4cbcfc177ab1a753e9cb8bc7302c1622db80f07fd5a8b1dad70780a242055539`.
+The ECS deployment revision was
+`arn:aws:ecs:ap-southeast-3:163918295215:service-deployment/iris-mlops/iris-mlops/Z27gI_k-WPAQ1Tpe4sEhv`.
+
+Post-deployment verification confirmed the public health endpoint, Iris
+setosa prediction, House online prediction, labeled and invalid House batch
+validation, structured CloudWatch logs, and House Pricing custom metrics. The
+training workflow remains manual and does not retrain during application
+deployment.
