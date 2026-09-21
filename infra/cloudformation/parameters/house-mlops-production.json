@@ -1,7 +1,7 @@
 [
   {
     "ParameterKey": "GitHubOAuthTokenSecretArn",
-    "ParameterValue": "arn:aws:secretsmanager:ap-southeast-3:163918295215:secret:REPLACE_WITH_GITHUB_OAUTH_TOKEN"
+    "ParameterValue": "arn:aws:secretsmanager:ap-southeast-3:163918295215:secret:house-mlops/github-oauth-token-qPgOrn"
   },
   {
     "ParameterKey": "GitHubWebhookSecretName",
