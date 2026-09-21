@@ -220,7 +220,7 @@ def _selected_product() -> str:
         return IRIS_PRODUCT
     return sidebar.radio(
         "Product",
-        [IRIS_PRODUCT, HOUSE_PRODUCT],
+        [IRIS_PRODUCT],
         index=0,
     )
 

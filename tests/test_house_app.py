@@ -147,6 +147,7 @@ def test_house_page_renders_all_declared_inputs_versions_and_prediction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake_st = FakeHouseStreamlit()
+    monkeypatch.setenv("APP_VARIANT", "house")
     service = FakeHouseService(result=_result())
     settings = SimpleNamespace(model_version="v1", dataset_version="v1")
     house_model = SimpleNamespace(
@@ -215,10 +216,7 @@ def test_house_page_renders_all_declared_inputs_versions_and_prediction(
         name == "success" and "215,000" in str(value)
         for name, value in fake_st.calls
     )
-    assert any(
-        "House Price Prediction" in str(value)
-        for _, value in fake_st.sidebar.calls
-    )
+    assert fake_st.sidebar.calls == []
     assert not any(
         "This educational model learns from selected Ames, Iowa features in the "
         "Kaggle House Prices dataset. It demonstrates validation, preprocessing, "
@@ -286,6 +284,7 @@ def test_iris_selection_does_not_load_house_configuration(
 
     app.main()
 
+    assert fake_st.sidebar.calls == [("Product", [app.IRIS_PRODUCT])]
     assert any("Iris model unavailable" in message for message in fake_st.errors)
 
 
