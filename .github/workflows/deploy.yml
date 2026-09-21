@@ -153,10 +153,33 @@ jobs:
             service_arn="$(jq -r '.service.serviceArn' /tmp/iris-express-service.json)"
           fi
 
-          aws ecs monitor-express-gateway-service \
-            --service-arn "${service_arn}" \
-            --monitor-resources DEPLOYMENT \
-            --monitor-mode TEXT-ONLY
+          deployment_arn="$(aws ecs list-service-deployments \
+            --service "${service_arn}" \
+            --query 'serviceDeployments[0].serviceDeploymentArn' \
+            --output text)"
+          [[ -n "${deployment_arn}" && "${deployment_arn}" != "None" ]]
+
+          deployment_status=""
+          for attempt in {1..40}; do
+            deployment_status="$(aws ecs describe-service-deployments \
+              --service-deployment-arns "${deployment_arn}" \
+              --query 'serviceDeployments[0].status' \
+              --output text)"
+            case "${deployment_status}" in
+              SUCCESSFUL)
+                break
+                ;;
+              FAILED|STOPPED)
+                echo "ECS deployment ${deployment_arn} ended with status ${deployment_status}." >&2
+                exit 1
+                ;;
+            esac
+            if [[ "${attempt}" -eq 40 ]]; then
+              echo "Timed out waiting for ECS deployment ${deployment_arn}; last status: ${deployment_status}." >&2
+              exit 1
+            fi
+            sleep 15
+          done
 
           endpoint="$(aws ecs describe-express-gateway-service \
             --service-arn "${service_arn}" \

@@ -54,6 +54,9 @@ def test_deployment_workflow_is_main_only_oidc_and_sha_tagged() -> None:
     assert "docker push" in workflow
     assert "create-express-gateway-service" in workflow
     assert "update-express-gateway-service" in workflow
+    assert "list-service-deployments" in workflow
+    assert "describe-service-deployments" in workflow
+    assert "monitor-express-gateway-service" not in workflow
     assert "/_stcore/health" in workflow
     assert "IRIS_MODEL_S3_BUCKET" in workflow
     assert "IRIS_MODEL_S3_KEY" in workflow
