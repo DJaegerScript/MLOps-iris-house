@@ -34,6 +34,12 @@ env:
   IRIS_MODEL_VERSION: ${{ vars.IRIS_MODEL_VERSION || 'v1' }}
   IRIS_ENVIRONMENT: ${{ vars.IRIS_ENVIRONMENT || 'production' }}
   LOW_CONFIDENCE_THRESHOLD: ${{ vars.LOW_CONFIDENCE_THRESHOLD || '0.80' }}
+  HOUSE_MODEL_S3_BUCKET: ${{ vars.HOUSE_MODEL_S3_BUCKET || vars.IRIS_MODEL_S3_BUCKET }}
+  HOUSE_MODEL_S3_KEY: ${{ vars.HOUSE_MODEL_S3_KEY }}
+  HOUSE_MODEL_S3_VERSION_ID: ${{ vars.HOUSE_MODEL_S3_VERSION_ID }}
+  HOUSE_MODEL_VERSION: ${{ vars.HOUSE_MODEL_VERSION || 'v1' }}
+  HOUSE_DATASET_VERSION: ${{ vars.HOUSE_DATASET_VERSION || 'v1' }}
+  HOUSE_ENVIRONMENT: ${{ vars.HOUSE_ENVIRONMENT || 'production' }}
 
 jobs:
   deploy:
@@ -97,9 +103,51 @@ jobs:
           : "${IRIS_MODEL_S3_BUCKET:?Set repository variable IRIS_MODEL_S3_BUCKET}"
           : "${IRIS_MODEL_S3_KEY:?Set repository variable IRIS_MODEL_S3_KEY}"
           : "${IRIS_MODEL_S3_VERSION_ID:?Set repository variable IRIS_MODEL_S3_VERSION_ID}"
+          : "${HOUSE_MODEL_S3_BUCKET:?Set repository variable HOUSE_MODEL_S3_BUCKET}"
+          : "${HOUSE_MODEL_S3_KEY:?Set repository variable HOUSE_MODEL_S3_KEY}"
+          : "${HOUSE_MODEL_S3_VERSION_ID:?Set repository variable HOUSE_MODEL_S3_VERSION_ID}"
           : "${ECS_EXECUTION_ROLE_ARN:?Set repository variable IRIS_ECS_EXECUTION_ROLE_ARN}"
           : "${ECS_INFRASTRUCTURE_ROLE_ARN:?Set repository variable IRIS_ECS_INFRASTRUCTURE_ROLE_ARN}"
           : "${ECS_TASK_ROLE_ARN:?Set repository variable IRIS_ECS_TASK_ROLE_ARN}"
+
+          task_role_name="${ECS_TASK_ROLE_ARN##*/}"
+          policy_document="$(aws iam get-role-policy \
+            --role-name "${task_role_name}" \
+            --policy-name house-pricing-model-read \
+            --query PolicyDocument --output json)"
+          HOUSE_MODEL_S3_BUCKET="${HOUSE_MODEL_S3_BUCKET}" \
+          HOUSE_MODEL_S3_KEY="${HOUSE_MODEL_S3_KEY}" \
+          POLICY_DOCUMENT="${policy_document}" \
+            python - <<'PY'
+          import json
+          import os
+          from urllib.parse import unquote
+
+          policy = json.loads(unquote(os.environ["POLICY_DOCUMENT"]))
+          expected_resource = (
+              f"arn:aws:s3:::{os.environ['HOUSE_MODEL_S3_BUCKET']}/"
+              f"{os.environ['HOUSE_MODEL_S3_KEY']}"
+          )
+          statements = policy.get("Statement", [])
+          if isinstance(statements, dict):
+              statements = [statements]
+          allowed = False
+          for statement in statements:
+              actions = statement.get("Action", [])
+              resources = statement.get("Resource", [])
+              if isinstance(actions, str):
+                  actions = [actions]
+              if isinstance(resources, str):
+                  resources = [resources]
+              if (
+                  statement.get("Effect") == "Allow"
+                  and {"s3:GetObject", "s3:GetObjectVersion"}.issubset(actions)
+                  and resources == [expected_resource]
+              ):
+                  allowed = True
+          if not allowed:
+              raise SystemExit("task role lacks exact House model read permission")
+          PY
 
           python - <<'PY'
           import json
@@ -122,6 +170,12 @@ jobs:
                   {"name": "GIT_COMMIT_SHA", "value": os.environ["GIT_COMMIT_SHA"]},
                   {"name": "DOCKER_IMAGE_VERSION", "value": os.environ["DOCKER_IMAGE_VERSION"]},
                   {"name": "LOW_CONFIDENCE_THRESHOLD", "value": os.environ["LOW_CONFIDENCE_THRESHOLD"]},
+                  {"name": "HOUSE_MODEL_S3_BUCKET", "value": os.environ["HOUSE_MODEL_S3_BUCKET"]},
+                  {"name": "HOUSE_MODEL_S3_KEY", "value": os.environ["HOUSE_MODEL_S3_KEY"]},
+                  {"name": "HOUSE_MODEL_S3_VERSION_ID", "value": os.environ["HOUSE_MODEL_S3_VERSION_ID"]},
+                  {"name": "HOUSE_MODEL_VERSION", "value": os.environ["HOUSE_MODEL_VERSION"]},
+                  {"name": "HOUSE_DATASET_VERSION", "value": os.environ["HOUSE_DATASET_VERSION"]},
+                  {"name": "HOUSE_ENVIRONMENT", "value": os.environ["HOUSE_ENVIRONMENT"]},
               ],
           }
           Path("/tmp/iris-primary-container.json").write_text(
@@ -199,4 +253,8 @@ jobs:
             echo "- Model version: \`${IRIS_MODEL_VERSION}\`"
             echo "- Service ARN: \`${service_arn}\`"
             echo "- Endpoint: ${endpoint}"
+            echo "### House Pricing deployment"
+            echo "- Model version: \`${HOUSE_MODEL_VERSION}\`"
+            echo "- Dataset version: \`${HOUSE_DATASET_VERSION}\`"
+            echo "- Model S3 VersionId: \`${HOUSE_MODEL_S3_VERSION_ID}\`"
           } >> "${GITHUB_STEP_SUMMARY}"

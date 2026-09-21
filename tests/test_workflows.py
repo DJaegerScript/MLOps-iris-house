@@ -79,6 +79,6 @@ def test_deployment_workflow_is_main_only_oidc_and_sha_tagged() -> None:
     assert "DOCKER_IMAGE_VERSION" in workflow
     assert "AWS_ACCESS_KEY_ID" not in workflow
     assert "AWS_SECRET_ACCESS_KEY" not in workflow
-    assert "dataset" not in workflow.lower()
+    assert "HOUSE_DATASET_VERSION" in workflow
     assert "model.pkl" not in workflow.lower()
     assert "train" not in workflow.lower()
