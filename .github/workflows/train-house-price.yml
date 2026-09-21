@@ -24,14 +24,6 @@ on:
         description: Human reason required when requesting promotion
         required: false
         type: string
-  push:
-    paths:
-      - "src/house_pricing_mlops/**"
-      - "scripts/train_house_price_model.py"
-      - "scripts/promote_house_price_model.py"
-      - "requirements-training.txt"
-      - "tests/fixtures/house_prices/**"
-      - ".github/workflows/train-house-price.yml"
 
 permissions:
   contents: read

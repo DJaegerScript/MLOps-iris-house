@@ -7,13 +7,11 @@ WORKFLOW = (
 )
 
 
-def test_training_workflow_is_manual_or_narrowly_scoped_and_uses_oidc() -> None:
+def test_training_workflow_is_manual_and_uses_oidc() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
     assert "workflow_dispatch:" in workflow
-    assert "paths:" in workflow
-    assert "src/house_pricing_mlops/**" in workflow
-    assert "scripts/train_house_price_model.py" in workflow
+    assert "push:" not in workflow
     assert "id-token: write" in workflow
     assert "aws-actions/configure-aws-credentials@" in workflow
     assert "HOUSE_TRAINING_ROLE_ARN" in workflow
