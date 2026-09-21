@@ -1,4 +1,4 @@
-"""Start the shared application pipeline with one approved House release."""
+"""Start the House-only application pipeline with one approved release."""
 
 from __future__ import annotations
 
@@ -15,6 +15,9 @@ if __package__ in {None, ""}:
 
 from house_pricing_mlops.release import HouseReleaseManifest, ReleaseValidationError
 from scripts.codepipeline.validate_house_release import load_release
+
+HOUSE_APP_PIPELINE_NAME = "house-pricing-app"
+HOUSE_DEPLOYMENT_SERVICE_NAME = "house-pricing"
 
 
 def load_approved_release(path: str | Path) -> HouseReleaseManifest:
@@ -97,7 +100,7 @@ def start_app_pipeline(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--pipeline-name", default="house-pricing-app")
+    parser.add_argument("--pipeline-name", default=HOUSE_APP_PIPELINE_NAME)
     parser.add_argument("--release", type=Path)
     parser.add_argument("--approved-release-parameter-name")
     parser.add_argument("--region")
@@ -132,6 +135,7 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(
             {
                 "pipeline_name": args.pipeline_name,
+                "deployment_service": HOUSE_DEPLOYMENT_SERVICE_NAME,
                 "pipeline_execution_id": execution_id,
                 "house_model_version": release.model_version,
                 "house_model_s3_version_id": release.model_s3_version_id,

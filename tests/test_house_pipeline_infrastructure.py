@@ -87,6 +87,35 @@ def test_template_defines_isolated_house_ecs_target_and_runtime_contract() -> No
     assert "Ref: HouseEcsTaskRoleArn" in deploy_project
 
 
+def test_house_deploy_role_is_scoped_to_house_service_roles() -> None:
+    template = TEMPLATE.read_text(encoding="utf-8")
+    role_start = template.index("  HouseAppDeployRole:")
+    role_end = template.index("  HouseModelTrainProject:", role_start)
+    deploy_role = template[role_start:role_end]
+
+    for action in (
+        "ecs:CreateExpressGatewayService",
+        "ecs:DescribeExpressGatewayService",
+        "ecs:DescribeServiceDeployments",
+        "ecs:ListServiceDeployments",
+        "ecs:UpdateExpressGatewayService",
+    ):
+        assert action in deploy_role
+    assert "Ref: EcsExecutionRoleArn" in deploy_role
+    assert "Ref: EcsInfrastructureRoleArn" in deploy_role
+    assert "Ref: HouseEcsTaskRoleArn" in deploy_role
+    assert (
+        "arn:aws:ecs:ap-southeast-3:163918295215:service/iris-mlops/iris-mlops"
+        not in deploy_role
+    )
+
+    project_start = template.index("  HouseAppDeployProject:")
+    project_end = template.index("  HouseModelPipeline:", project_start)
+    deploy_project = template[project_start:project_end]
+    assert "Ref: HouseEcsServiceArn" in deploy_project
+    assert "Ref: EcsServiceArn" not in deploy_project
+
+
 def test_production_parameter_file_has_no_secret_values() -> None:
     assert PARAMETERS.is_file(), "production parameter file is missing"
     parameters = PARAMETERS.read_text(encoding="utf-8")

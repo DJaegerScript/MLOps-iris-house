@@ -95,6 +95,21 @@ def test_handoff_starts_app_pipeline_with_exact_release_coordinates() -> None:
     assert "latest" not in json.dumps(variables).lower()
 
 
+def test_handoff_reports_house_only_deployment_target() -> None:
+    client = FakeCodePipeline()
+    handoff_api = _handoff_api()
+
+    execution_id = handoff_api.start_app_pipeline(
+        client,
+        pipeline_name="house-pricing-app",
+        release=_manifest(),
+    )
+
+    assert execution_id == "execution-123"
+    assert handoff_api.HOUSE_DEPLOYMENT_SERVICE_NAME == "house-pricing"
+    assert client.calls[0]["name"] == handoff_api.HOUSE_APP_PIPELINE_NAME
+
+
 def test_handoff_rejects_candidate_or_incomplete_release(tmp_path: Path) -> None:
     handoff_api = _handoff_api()
     candidate_path = tmp_path / "candidate.json"
