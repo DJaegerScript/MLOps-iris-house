@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from house_pricing_mlops.release import HouseReleaseManifest, ReleaseValidationError
+
 
 class RegistryError(ValueError):
     """A safe model registration or promotion failure."""
@@ -91,6 +93,80 @@ class VersionedModelRegistry:
         self._write(state)
         return record
 
+    def register_candidate_release(
+        self,
+        *,
+        model_name: str,
+        model_version: str,
+        run_id: str,
+        dataset_version: str,
+        dataset_s3_bucket: str,
+        dataset_s3_key: str,
+        dataset_s3_version_id: str,
+        bundle_sha256: str,
+        model_s3_bucket: str,
+        model_s3_key: str,
+        model_s3_version_id: str,
+        selected_model: str,
+        metrics: Mapping[str, object],
+        git_commit_sha: str,
+    ) -> HouseReleaseManifest:
+        """Persist a complete candidate manifest after immutable S3 upload."""
+
+        state = self._load()
+        registry_version = str(len(state["versions"]) + 1)
+        try:
+            manifest = HouseReleaseManifest(
+                model_name=model_name,
+                model_version=model_version,
+                registry_version=registry_version,
+                dataset_version=dataset_version,
+                dataset_s3_bucket=dataset_s3_bucket,
+                dataset_s3_key=dataset_s3_key,
+                dataset_s3_version_id=dataset_s3_version_id,
+                model_s3_bucket=model_s3_bucket,
+                model_s3_key=model_s3_key,
+                model_s3_version_id=model_s3_version_id,
+                bundle_sha256=bundle_sha256,
+                mlflow_run_id=run_id,
+                selected_model=selected_model,
+                metrics=metrics,
+                git_commit_sha=git_commit_sha,
+                status="candidate",
+            )
+        except ReleaseValidationError as error:
+            raise RegistryError(str(error)) from error
+
+        record: dict[str, object] = {
+            "registry_version": registry_version,
+            "model_name": model_name,
+            "model_version": model_version,
+            "status": "candidate",
+            "run_id": run_id,
+            "dataset_version": dataset_version,
+            "bundle_sha256": bundle_sha256,
+            "selected_model": selected_model,
+            "metrics": manifest.to_dict()["metrics"],
+            "release_manifest": manifest.to_dict(),
+            "registered_at": datetime.now(UTC).isoformat(),
+        }
+        state["versions"].append(record)
+        state["aliases"]["candidate"] = registry_version
+        self._write(state)
+        return manifest
+
+    def read_release_manifest(self, registry_version: str) -> HouseReleaseManifest:
+        """Read and validate the complete release manifest for one version."""
+
+        record = _find_version(self._load(), registry_version)
+        payload = record.get("release_manifest")
+        if not isinstance(payload, Mapping):
+            raise RegistryError("registry version has no release manifest")
+        try:
+            return HouseReleaseManifest.from_dict(payload)
+        except ReleaseValidationError as error:
+            raise RegistryError(str(error)) from error
+
     def promote_champion(
         self,
         registry_version: str,
@@ -106,6 +182,7 @@ class VersionedModelRegistry:
         record = _find_version(state, registry_version)
         previous = state["aliases"].get("champion")
         record["status"] = "champion"
+        _apply_release_approval(record, approved_by=approved_by, reason=reason)
         state["aliases"]["champion"] = registry_version
         state["promotion_decisions"].append(
             _decision(
@@ -135,6 +212,7 @@ class VersionedModelRegistry:
         record = _find_version(state, registry_version)
         previous = state["aliases"].get("champion")
         record["status"] = "champion"
+        _apply_release_approval(record, approved_by=approved_by, reason=reason)
         state["aliases"]["champion"] = registry_version
         state["promotion_decisions"].append(
             _decision(
@@ -216,6 +294,24 @@ def _decision(
         "reason": reason,
         "approved_at": approved_at or datetime.now(UTC).isoformat(),
     }
+
+
+def _apply_release_approval(
+    record: dict[str, object], *, approved_by: str, reason: str
+) -> None:
+    payload = record.get("release_manifest")
+    if not isinstance(payload, Mapping):
+        return
+    try:
+        manifest = HouseReleaseManifest.from_dict(payload).with_approval(
+            approved_by=approved_by,
+            approval_reason=reason,
+        )
+    except ReleaseValidationError as error:
+        raise RegistryError(str(error)) from error
+    record["release_manifest"] = manifest.to_dict()
+    record["approved_by"] = approved_by
+    record["approval_reason"] = reason
 
 
 def _json_safe(value: Mapping[str, object]) -> dict[str, object]:
