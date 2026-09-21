@@ -46,12 +46,20 @@ phases:
           aws ecr get-login-password --region "$AWS_REGION" \
             | docker login --username AWS --password-stdin \
               "${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-          docker build --pull --file Dockerfile --tag "$IMAGE_URI" .
-          docker push "$IMAGE_URI"
-          export IMAGE_DIGEST="$(aws ecr describe-images \
+          existing_digest="$(aws ecr describe-images \
             --repository-name "$ECR_REPOSITORY" \
             --image-ids "imageTag=${CODEBUILD_RESOLVED_SOURCE_VERSION}" \
-            --query 'imageDetails[0].imageDigest' --output text)"
+            --query 'imageDetails[0].imageDigest' --output text 2>/dev/null || true)"
+          if [[ -n "$existing_digest" && "$existing_digest" != "None" ]]; then
+            export IMAGE_DIGEST="$existing_digest"
+          else
+            docker build --pull --file Dockerfile --tag "$IMAGE_URI" .
+            docker push "$IMAGE_URI"
+            export IMAGE_DIGEST="$(aws ecr describe-images \
+              --repository-name "$ECR_REPOSITORY" \
+              --image-ids "imageTag=${CODEBUILD_RESOLVED_SOURCE_VERSION}" \
+              --query 'imageDetails[0].imageDigest' --output text)"
+          fi
           test -n "$IMAGE_DIGEST" && test "$IMAGE_DIGEST" != "None"
         fi
         IMAGE_URI="$IMAGE_URI" \
