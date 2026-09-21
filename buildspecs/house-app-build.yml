@@ -1,0 +1,46 @@
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.12
+    commands:
+      - python -m pip install -r requirements.txt -r requirements-dev.txt -r requirements-training.txt
+  pre_build:
+    commands:
+      - |
+        set -euo pipefail
+        : "${AWS_REGION:?AWS_REGION is required}"
+        : "${ECR_REPOSITORY:?ECR_REPOSITORY is required}"
+        : "${CODEBUILD_RESOLVED_SOURCE_VERSION:?CODEBUILD_RESOLVED_SOURCE_VERSION is required}"
+        account_id="$(aws sts get-caller-identity --query Account --output text)"
+        image_uri="${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${CODEBUILD_RESOLVED_SOURCE_VERSION}"
+        export IMAGE_URI="$image_uri"
+        mkdir -p "$CODEBUILD_SRC_DIR/output"
+        aws ecr get-login-password --region "$AWS_REGION" \
+          | docker login --username AWS --password-stdin \
+            "${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+  build:
+    commands:
+      - python -m pytest -q
+      - python -m ruff check .
+      - |
+        set -euo pipefail
+        docker build --pull --file Dockerfile --tag "$IMAGE_URI" .
+        docker push "$IMAGE_URI"
+        digest="$(aws ecr describe-images \
+          --repository-name "$ECR_REPOSITORY" \
+          --image-ids "imageTag=${CODEBUILD_RESOLVED_SOURCE_VERSION}" \
+          --query 'imageDetails[0].imageDigest' --output text)"
+        test -n "$digest" && test "$digest" != "None"
+        IMAGE_URI="$IMAGE_URI" \
+        COMMIT_SHA="$CODEBUILD_RESOLVED_SOURCE_VERSION" \
+        IMAGE_DIGEST="$digest" \
+          python -c 'import json,os; json.dump({"image_uri":os.environ["IMAGE_URI"],"commit_sha":os.environ["COMMIT_SHA"],"digest":os.environ["IMAGE_DIGEST"]}, open("output/image-release.json", "w"), sort_keys=True, indent=2); open("output/image-release.json", "a").write("\n")'
+
+artifacts:
+  files:
+    - output/image-release.json

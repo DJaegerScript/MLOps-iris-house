@@ -1,0 +1,168 @@
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.12
+    commands:
+      - python -m pip install -r requirements.txt
+  pre_build:
+    commands:
+      - |
+        set -euo pipefail
+        : "${AWS_REGION:?AWS_REGION is required}"
+        : "${ECS_SERVICE_ARN:?ECS_SERVICE_ARN is required}"
+        : "${ECS_EXECUTION_ROLE_ARN:?ECS_EXECUTION_ROLE_ARN is required}"
+        : "${ECS_TASK_ROLE_ARN:?ECS_TASK_ROLE_ARN is required}"
+        : "${IRIS_MODEL_S3_BUCKET:?IRIS_MODEL_S3_BUCKET is required}"
+        : "${IRIS_MODEL_S3_KEY:?IRIS_MODEL_S3_KEY is required}"
+        : "${IRIS_MODEL_S3_VERSION_ID:?IRIS_MODEL_S3_VERSION_ID is required}"
+        : "${IRIS_MODEL_VERSION:?IRIS_MODEL_VERSION is required}"
+        : "${CLOUDWATCH_LOG_GROUP:?CLOUDWATCH_LOG_GROUP is required}"
+        image_release="$(find "$CODEBUILD_SRC_DIR" -name image-release.json -print -quit)"
+        approved_release="$(find "$CODEBUILD_SRC_DIR" -name approved-release.json -print -quit)"
+        test -n "$image_release" && test -n "$approved_release"
+        IMAGE_RELEASE="$image_release" \
+        APPROVED_RELEASE="$approved_release" \
+          python - <<'PY'
+        import json
+        import os
+        from pathlib import Path
+
+        image = json.loads(Path(os.environ["IMAGE_RELEASE"]).read_text())
+        release = json.loads(Path(os.environ["APPROVED_RELEASE"]).read_text())
+        if release.get("status") != "champion":
+            raise SystemExit("approved House release is not champion")
+        required = (
+            "model_s3_bucket",
+            "model_s3_key",
+            "model_s3_version_id",
+            "model_version",
+            "dataset_version",
+            "bundle_sha256",
+        )
+        if any(not isinstance(release.get(name), str) or not release[name].strip() for name in required):
+            raise SystemExit("approved House release is incomplete")
+        if not image.get("image_uri") or not image.get("commit_sha") or not image.get("digest"):
+            raise SystemExit("image release is incomplete")
+        PY
+        export IMAGE_URI="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["image_uri"])' "$image_release")"
+        export GIT_COMMIT_SHA="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["commit_sha"])' "$image_release")"
+        export DOCKER_IMAGE_VERSION="$GIT_COMMIT_SHA"
+        export HOUSE_MODEL_S3_BUCKET="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["model_s3_bucket"])' "$approved_release")"
+        export HOUSE_MODEL_S3_KEY="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["model_s3_key"])' "$approved_release")"
+        export HOUSE_MODEL_S3_VERSION_ID="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["model_s3_version_id"])' "$approved_release")"
+        export HOUSE_MODEL_VERSION="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["model_version"])' "$approved_release")"
+        export HOUSE_DATASET_VERSION="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["dataset_version"])' "$approved_release")"
+        task_role_name="${ECS_TASK_ROLE_ARN##*/}"
+        policy_document="$(aws iam get-role-policy \
+          --role-name "$task_role_name" \
+          --policy-name house-pricing-model-read \
+          --query PolicyDocument --output json)"
+        HOUSE_MODEL_S3_BUCKET="$HOUSE_MODEL_S3_BUCKET" \
+        HOUSE_MODEL_S3_KEY="$HOUSE_MODEL_S3_KEY" \
+        POLICY_DOCUMENT="$policy_document" \
+          python - <<'PY'
+        import json
+        import os
+        from urllib.parse import unquote
+
+        policy = json.loads(unquote(os.environ["POLICY_DOCUMENT"]))
+        expected_resource = (
+            f"arn:aws:s3:::{os.environ['HOUSE_MODEL_S3_BUCKET']}/"
+            f"{os.environ['HOUSE_MODEL_S3_KEY']}"
+        )
+        statements = policy.get("Statement", [])
+        if isinstance(statements, dict):
+            statements = [statements]
+        if not any(
+            statement.get("Effect") == "Allow"
+            and set(
+                [statement.get("Action")]
+                if isinstance(statement.get("Action"), str)
+                else statement.get("Action", [])
+            ) >= {"s3:GetObject", "s3:GetObjectVersion"}
+            and (
+                [statement.get("Resource")]
+                if isinstance(statement.get("Resource"), str)
+                else statement.get("Resource", [])
+            ) == [expected_resource]
+            for statement in statements
+        ):
+            raise SystemExit("task role lacks exact House model read permission")
+        PY
+        mkdir -p "$CODEBUILD_SRC_DIR/output"
+        export PREVIOUS_DEPLOYMENT_ARN="$(aws ecs list-service-deployments \
+          --service "$ECS_SERVICE_ARN" \
+          --query 'serviceDeployments[0].serviceDeploymentArn' --output text)"
+        IRIS_MODEL_S3_BUCKET="$IRIS_MODEL_S3_BUCKET" \
+        IRIS_MODEL_S3_KEY="$IRIS_MODEL_S3_KEY" \
+        IRIS_MODEL_S3_VERSION_ID="$IRIS_MODEL_S3_VERSION_ID" \
+        IRIS_MODEL_VERSION="$IRIS_MODEL_VERSION" \
+        HOUSE_MODEL_S3_BUCKET="$HOUSE_MODEL_S3_BUCKET" \
+        HOUSE_MODEL_S3_KEY="$HOUSE_MODEL_S3_KEY" \
+        HOUSE_MODEL_S3_VERSION_ID="$HOUSE_MODEL_S3_VERSION_ID" \
+        HOUSE_MODEL_VERSION="$HOUSE_MODEL_VERSION" \
+        HOUSE_DATASET_VERSION="$HOUSE_DATASET_VERSION" \
+        IMAGE_URI="$IMAGE_URI" \
+        GIT_COMMIT_SHA="$GIT_COMMIT_SHA" \
+        DOCKER_IMAGE_VERSION="$DOCKER_IMAGE_VERSION" \
+        CLOUDWATCH_LOG_GROUP="$CLOUDWATCH_LOG_GROUP" \
+          python - <<'PY'
+        import json
+        import os
+        from pathlib import Path
+
+        primary_container = {
+            "image": os.environ["IMAGE_URI"],
+            "containerPort": 8501,
+            "awsLogsConfiguration": {
+                "logGroup": os.environ["CLOUDWATCH_LOG_GROUP"],
+                "logStreamPrefix": "iris-mlops",
+            },
+            "environment": [
+                {"name": "IRIS_MODEL_S3_BUCKET", "value": os.environ["IRIS_MODEL_S3_BUCKET"]},
+                {"name": "IRIS_MODEL_S3_KEY", "value": os.environ["IRIS_MODEL_S3_KEY"]},
+                {"name": "IRIS_MODEL_S3_VERSION_ID", "value": os.environ["IRIS_MODEL_S3_VERSION_ID"]},
+                {"name": "IRIS_MODEL_VERSION", "value": os.environ["IRIS_MODEL_VERSION"]},
+                {"name": "HOUSE_MODEL_S3_BUCKET", "value": os.environ["HOUSE_MODEL_S3_BUCKET"]},
+                {"name": "HOUSE_MODEL_S3_KEY", "value": os.environ["HOUSE_MODEL_S3_KEY"]},
+                {"name": "HOUSE_MODEL_S3_VERSION_ID", "value": os.environ["HOUSE_MODEL_S3_VERSION_ID"]},
+                {"name": "HOUSE_MODEL_VERSION", "value": os.environ["HOUSE_MODEL_VERSION"]},
+                {"name": "HOUSE_DATASET_VERSION", "value": os.environ["HOUSE_DATASET_VERSION"]},
+                {"name": "GIT_COMMIT_SHA", "value": os.environ["GIT_COMMIT_SHA"]},
+                {"name": "DOCKER_IMAGE_VERSION", "value": os.environ["DOCKER_IMAGE_VERSION"]},
+            ],
+        }
+        Path("/tmp/primary-container.json").write_text(
+            json.dumps(primary_container, sort_keys=True), encoding="utf-8"
+        )
+        PY
+  build:
+    commands:
+      - |
+        set -euo pipefail
+        aws ecs update-express-gateway-service \
+          --service-arn "$ECS_SERVICE_ARN" \
+          --execution-role-arn "$ECS_EXECUTION_ROLE_ARN" \
+          --task-role-arn "$ECS_TASK_ROLE_ARN" \
+          --primary-container file:///tmp/primary-container.json \
+          --health-check-path "/_stcore/health"
+        # The helper returns only after the new deployment is SUCCESSFUL.
+        bash scripts/codepipeline/wait_for_ecs_express_deployment.sh \
+          "$ECS_SERVICE_ARN" "$PREVIOUS_DEPLOYMENT_ARN"
+        endpoint="$(aws ecs describe-express-gateway-service \
+          --service-arn "$ECS_SERVICE_ARN" \
+          --query 'service.activeConfigurations[0].ingressPaths[0].endpoint' \
+          --output text)"
+        smoke_url="${PUBLIC_HEALTH_URL:-${endpoint}/_stcore/health}"
+        curl --fail --silent --show-error "$smoke_url" >/dev/null
+        python -c 'import json,sys; json.dump({"image_uri":sys.argv[1],"commit_sha":sys.argv[2],"house_model_version":sys.argv[3],"house_model_s3_version_id":sys.argv[4],"health_url":sys.argv[5],"status":"HEALTHY"}, open("output/deployment-summary.json", "w"), indent=2, sort_keys=True); open("output/deployment-summary.json", "a").write("\n")' \
+          "$IMAGE_URI" "$GIT_COMMIT_SHA" "$HOUSE_MODEL_VERSION" "$HOUSE_MODEL_S3_VERSION_ID" "$smoke_url"
+
+artifacts:
+  files:
+    - output/deployment-summary.json
