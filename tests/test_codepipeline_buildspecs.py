@@ -40,6 +40,7 @@ def test_promotion_buildspec_validates_approval_and_writes_immutable_release() -
     buildspec = PROMOTE_BUILDSPEC.read_text(encoding="utf-8")
 
     assert "release_manifest.json" in buildspec
+    assert "CODEBUILD_SRC_DIR_CandidateOutput" in buildspec
     assert "APPROVED_BY" in buildspec
     assert "APPROVAL_REASON" in buildspec
     assert "promote" in buildspec
