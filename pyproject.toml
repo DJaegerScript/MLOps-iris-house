@@ -13,6 +13,7 @@ dependencies = [
     "numpy==2.3.3",
     "scipy==1.17.1",
     "scikit-learn==1.8.0",
+    "streamlit==1.50.0",
     "threadpoolctl==3.7.0",
 ]
 
@@ -21,7 +22,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 addopts = "-ra"
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 
 [tool.ruff]
