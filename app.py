@@ -71,6 +71,7 @@ _HOUSE_CATEGORY_LABELS: dict[str, dict[str, str]] = {
         "ClearCr": "Clear Creek",
         "CollgCr": "College Creek",
         "Crawford": "Crawford",
+        "Crawfor": "Crawford",
         "Edwards": "Edwards",
         "Gilbert": "Gilbert",
         "IDOTRR": "Iowa DOT and Rail Road",
@@ -316,8 +317,10 @@ def _house_category_options(model: LoadedHousePriceModel, feature: str) -> list[
     try:
         categories = model.reference_profile["categorical"][feature]["categories"]
     except (AttributeError, KeyError, TypeError):
-        categories = []
-    return [str(category) for category in categories] or ["Known category"]
+        return []
+    if not isinstance(categories, list):
+        return []
+    return [str(category) for category in categories]
 
 
 def _house_category_label(feature: str, value: object) -> str:
